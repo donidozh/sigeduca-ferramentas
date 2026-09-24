@@ -1,11 +1,11 @@
 /**
- * Arquivo Digital — serviço Google Apps Script 1.4.1.
+ * Arquivo Digital — serviço Google Apps Script 1.5.0.
  * Configure API_TOKEN, ROOT_PERMANENTE, ROOT_FORMANDOS,
  * SHEET_PERMANENTE e SHEET_FORMANDOS nas Propriedades do script.
  * Não publique chaves ou configurações privadas no repositório.
  */
 const CONFIG = Object.freeze({
-  VERSION: '1.4.1',
+  VERSION: '1.5.0',
   API_TOKEN: PropertiesService.getScriptProperties().getProperty('API_TOKEN') || '',
   ROOT_FOLDERS: Object.freeze({
     PERMANENTE: PropertiesService.getScriptProperties().getProperty('ROOT_PERMANENTE') || '',
@@ -17,7 +17,7 @@ const CONFIG = Object.freeze({
   }),
   LINK_HEADER: 'PASTA DIGITAL', LINK_TEXT: '📁 Pasta Digital', MAX_BASE64_CHARS: 12 * 1024 * 1024
 });
-const BACKEND_VERSION = '1.4.1';
+const BACKEND_VERSION = '1.5.0';
 const INDEX_TTL_SECONDS = 900;
 
 function doGet() { return json_({ok:true,service:'Arquivo Digital',version:BACKEND_VERSION}); }
@@ -25,7 +25,7 @@ function doPost(e) {
   try {
     const payload=JSON.parse(e && e.postData && e.postData.contents || '{}');
     authorize_(payload);
-    const handlers={ping:()=>({ok:true,message:'Arquivo Digital conectado.',version:BACKEND_VERSION,capabilities:['studentIndex','idempotentUpload','parallelFolders','studentRegistration','studentChanges']}),getStudentChanges:getStudentChangesAction_,listBoxes:listBoxesAction_,registerStudent:registerStudentAction_,verifyStudent:verifyStudentAction_,searchStudents:searchStudentsAction_,getStudentIndex:getStudentIndexAction_,ensureStudentFolder:ensureStudentFolderAction_,uploadDocument:uploadDocumentAction_,listStudentDocuments:listStudentDocumentsAction_};
+    const handlers={ping:()=>({ok:true,message:'Arquivo Digital conectado.',version:BACKEND_VERSION,capabilities:['studentIndex','idempotentUpload','parallelFolders','studentRegistration','studentChanges']}),getStudentChanges:getStudentChangesAction_,listBoxes:listBoxesAction_,registerStudent:registerStudentAction_,verifyStudent:verifyStudentAction_,searchStudents:searchStudentsAction_,getStudentIndex:getStudentIndexAction_,ensureStudentFolder:ensureStudentFolderAction_,uploadDocument:uploadDocumentAction_,listStudentDocuments:listStudentDocumentsAction_,getStudentDocument:getStudentDocumentAction_};
     if(!Object.prototype.hasOwnProperty.call(handlers,payload.action))throw new Error('Ação não reconhecida.');
     return json_(handlers[payload.action](payload));
   }catch(error){console.error(error.message);return json_({ok:false,error:error.message || String(error),code:error.code || 'ERROR',retryable:error.code==='BUSY'});}
@@ -140,14 +140,49 @@ function studentIndex_(root,force,progress){
   try {cache.putAll(parts,INDEX_TTL_SECONDS);cache.put(prefix,JSON.stringify({chunkPrefix,parts:Object.keys(parts).length}),INDEX_TTL_SECONDS);}catch(error){console.warn('Índice não coube no cache: '+error.message);}
   return index;
 }
+function nameProximity_(query,name){
+  if(query===name)return 1;
+  const tokens=text=>text.split(/\s+/).filter(t=>!['DA','DE','DO','DAS','DOS','E'].includes(t));
+  const q=tokens(query),n=tokens(name);
+  if(!q.length||!n.length)return 0;
+  const similarity=(a,b)=>{
+    if(a===b)return 1;
+    let previous=Array.from({length:b.length+1},(_,i)=>i);
+    for(let i=1;i<=a.length;i++){
+      const current=[i];
+      for(let j=1;j<=b.length;j++)current[j]=Math.min(current[j-1]+1,previous[j]+1,previous[j-1]+Number(a[i-1]!==b[j-1]));
+      previous=current;
+    }
+    return 1-previous[b.length]/Math.max(a.length,b.length);
+  };
+  if(q.length===1)return Math.max(...n.map(t=>t.includes(q[0])?1:similarity(q[0],t)));
+  const used=new Set();let sum=0;
+  for(const token of q){
+    let best=0,position=-1;
+    n.forEach((word,i)=>{if(!used.has(i)){const score=similarity(token,word);if(score>best){best=score;position=i;}}});
+    if(position>=0)used.add(position);sum+=best;
+  }
+  return Math.max(similarity(query,name),sum/q.length*(.85+.15*Math.min(1,q.length/n.length)));
+}
 function searchStudentsAction_(payload){
   const started=Date.now(),root=root_(payload.root),query=normalize_(payload.query),birth=normalizeBirth_(payload.birth);
   if(query.length<3)throw new Error('Informe ao menos 3 caracteres do nome.');
-  const index=studentIndex_(root,Boolean(payload.forceRefresh));const words=query.split(/\s+/),terms=words.filter(w=>w.length>=3&&!/^(DAS|DOS|DEL|DELLA)$/.test(w)).sort((a,b)=>b.length-a.length).slice(0,3);
+  if(query.length>150)throw new Error('Informe um nome com até 150 caracteres.');
+  const cached=payload.forceRefresh?null:cachedIndex_(root);
+  const index=cached||studentIndex_(root,Boolean(payload.forceRefresh));
   const max=Math.max(1,Math.min(200,Number(payload.maxResults)||100));
-  const records=index.records.filter(r=>words.length===1?normalize_(r.name).includes(query):terms.some(t=>normalize_(r.name).includes(t)));
-  records.sort((a,b)=>Number(normalize_(b.name)===query)-Number(normalize_(a.name)===query)||Number(Boolean(birth&&b.birth===birth))-Number(Boolean(birth&&a.birth===birth))||a.name.localeCompare(b.name,'pt-BR')||a.sheet.localeCompare(b.sheet,'pt-BR',{numeric:true})||a.row-b.row);
-  return {ok:true,root,query:payload.query,results:records.slice(0,max),total:records.length,truncated:records.length>max,indexVersion:index.version,elapsedMs:Date.now()-started};
+  const records=index.records.map(r=>({...r,score:nameProximity_(query,normalize_(r.name)),exactName:normalize_(r.name)===query,exactBirth:Boolean(birth&&normalizeBirth_(r.birth)===birth),matchMode:'server'})).filter(r=>r.score>=(query.includes(' ')?0.55:0.7));
+  records.sort((a,b)=>Number(b.exactName)-Number(a.exactName)||Number(b.exactBirth)-Number(a.exactBirth)||b.score-a.score||a.name.localeCompare(b.name,'pt-BR')||a.sheet.localeCompare(b.sheet,'pt-BR',{numeric:true})||a.row-b.row);
+  return {ok:true,root,query:payload.query,results:records.slice(0,max),total:records.length,truncated:records.length>max,scored:true,searchMode:'server',indexCacheHit:Boolean(cached),indexVersion:index.version,elapsedMs:Date.now()-started};
+}
+// Diagnóstico somente de leitura: registra tempos e contagens, nunca dados pessoais.
+function testarBuscaPermanente(){testarBuscaServidor_('PERMANENTE');}
+function testarBuscaFormandos(){testarBuscaServidor_('FORMANDOS');}
+function testarBuscaServidor_(root){
+  for(const query of ['MARIA','MARIA','MRIA']){
+    const result=searchStudentsAction_({root,query,maxResults:10});
+    console.log(JSON.stringify({root,query,elapsedMs:result.elapsedMs,indexCacheHit:result.indexCacheHit,total:result.total,returned:result.results.length}));
+  }
 }
 function getStudentIndexAction_(payload){
   const root=root_(payload.root);const offset=Number(payload.offset||0);
@@ -263,6 +298,30 @@ function listStudentDocumentsAction_(payload){
   const student=validateStudent_(payload.student),folder=findStudentFolder_(student);if(!folder)return {ok:true,documents:[],folderUrl:''};
   const documents=[],files=folder.getFiles();while(files.hasNext()){const file=files.next();if(file.isTrashed()||file.getMimeType()!=='application/pdf')continue;documents.push({...documentInfo_(file),createdAt:file.getDateCreated().toISOString(),updatedAt:file.getLastUpdated().toISOString()});}
   documents.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));return {ok:true,folderId:folder.getId(),folderUrl:folder.getUrl(),folderName:folder.getName(),documents};
+}
+function getStudentDocumentAction_(payload){
+  const student=validateStudent_(payload.student),folder=findStudentFolder_(student);
+  if(!folder)throw new Error('Pasta digital não encontrada.');
+  const id=String(payload.documentId||'');if(!/^[A-Za-z0-9_-]+$/.test(id))throw new Error('Documento inválido.');
+  const file=DriveApp.getFileById(id),parents=file.getParents();let belongs=false;
+  while(parents.hasNext()){if(parents.next().getId()===folder.getId()){belongs=true;break;}}
+  if(!belongs||file.isTrashed())throw new Error('O documento não pertence à pasta selecionada.');
+  if(file.getMimeType()!=='application/pdf')throw new Error('Somente PDF pode ser visualizado.');
+  if(file.getSize()>20*1024*1024)throw new Error('PDF acima de 20 MB. Para este arquivo, use uma conta com acesso direto à pasta no Drive.');
+  const bytes=file.getBlob().getBytes();
+  if(bytes.length>20*1024*1024)throw new Error('PDF acima do limite de visualização.');
+  return {ok:true,document:{id:file.getId(),name:file.getName(),mimeType:'application/pdf',base64:Utilities.base64Encode(bytes)}};
+}
+function testarVisualizacaoPrivada(){
+  const records=studentIndex_('PERMANENTE',false).records.filter(r=>r.folderUrl).slice(0,10);
+  for(const record of records){
+    const student={root:record.root,name:record.name,birth:record.birth,physicalSheet:record.sheet,physicalRow:record.row};
+    const listing=listStudentDocumentsAction_({student});
+    const doc=listing.documents.find(d=>d.size<=20*1024*1024);if(!doc)continue;
+    const started=Date.now(),result=getStudentDocumentAction_({student,documentId:doc.id});
+    console.log(JSON.stringify({privatePreviewVerified:result.ok,mimeType:result.document.mimeType,base64Chars:result.document.base64.length,elapsedMs:Date.now()-started}));return;
+  }
+  console.log(JSON.stringify({privatePreviewVerified:false,reason:'Nenhum PDF elegível nas primeiras pastas consultadas.'}));
 }
 function inferTypeFromFilename_(name){const text=normalize_(name);for(const [pattern,type] of [[/HISTOR/,'Histórico Escolar'],[/FICHA INDIVIDUAL/,'Ficha Individual'],[/MATRIC/,'Ficha de Matrícula'],[/ATESTADO/,'Atestado Médico'],[/CERTIFIC|DIPLOMA/,'Certificado / Diploma'],[/SUS/,'Cartão SUS'],[/PAED/,'Documentos PAEDE'],[/TERMO/,'Termo de Compromisso']])if(pattern.test(text))return type;return 'Documento';}
 

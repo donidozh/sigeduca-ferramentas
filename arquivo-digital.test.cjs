@@ -6,12 +6,12 @@ const { webcrypto, createHash } = require('node:crypto');
 const source = fs.readFileSync(require('node:path').join(__dirname, 'ged/arquivo-digital-aluno.user.js'), 'utf8');
 
 function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
-  const values = new Map([['adig01:driveEndpoint','https://script.google.com/macros/s/test-only/exec'],['adig01:driveToken','test-only']]);
+  const values = new Map([['adig:searchMode','local'],['adig01:driveEndpoint','https://script.google.com/macros/s/test-only/exec'],['adig01:driveToken','test-only']]);
   let calls = 0;
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={ensureInitialStudentIndexes,syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={openConsultPreview,closeConsultPreview,searchStudentsRequest,ensureInitialStudentIndexes,syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -246,4 +246,24 @@ test('índices completos abrem sem conexão e falta de configuração não liber
  for(const root of ['PERMANENTE','FORMANDOS'])t.values.set(key+':index:'+root,{records:[],createdAt:1});
  await t.ensureInitialStudentIndexes();assert.equal(t.calls(),0);
  t.values.set('adig01:driveToken','');await assert.rejects(t.ensureInitialStudentIndexes(),/Configure a conexão/);
+});
+
+
+test('modo servidor não espera índice local nem envia pedido de reconstrução',async()=>{
+ const calls=[];const t=fixture(p=>{calls.push(p);return {ok:true,scored:true,results:[{name:'MARIA',score:.9}],elapsedMs:7,indexCacheHit:true};});
+ t.values.set('adig:searchMode','server');t.state.backendReady=new Promise(()=>{});t.el.cacheStatus={};
+ const result=await t.searchStudentsRequest({action:'searchStudents',root:'PERMANENTE',query:'MRIA'},true);
+ assert.equal(calls.length,1);assert.equal(calls[0].action,'searchStudents');assert.equal(calls[0].forceRefresh,false);assert.equal(JSON.parse(result.responseText).results[0].score,.9);
+ await t.queueIndexRefresh('FORMANDOS');assert.equal(calls.length,1);
+});
+
+
+test('fechar visualização ignora PDF privado que chegou depois',async()=>{
+ let release,started;const ready=new Promise(r=>started=r);
+ const t=fixture(()=>{started();return new Promise(r=>release=r);},{document:{title:'Test',createElement:()=>({setAttribute(){}}),createTextNode:text=>text}});
+ t.el.docModal={style:{}};t.el.docFrame={src:'about:blank'};t.el.docModalTitle={};t.el.docOpenNew={};t.el.docPreviewStatus={replaceChildren(){}};
+ t.state.selectedStudentMatch={root:'PERMANENTE',name:'ANA',sheet:'A1',row:3};
+ const pending=t.openConsultPreview({id:'pdf',name:'Teste',source:'Google Drive'});await ready;t.closeConsultPreview();
+ release({ok:true,document:{mimeType:'application/pdf',base64:'JVBERi0='}});await pending;
+ assert.equal(t.el.docModal.style.display,'none');assert.equal(t.el.docFrame.src,'about:blank');assert.equal(t.state.consultationObjectUrls.length,0);
 });

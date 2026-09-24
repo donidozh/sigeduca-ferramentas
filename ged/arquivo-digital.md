@@ -1,4 +1,10 @@
-# Arquivo Digital 0.14.1
+# Arquivo Digital 0.15.0
+
+**Teste de busca no servidor (padrão na 0.15.0):** a tela abre sem construir ou baixar índices locais. Cada pesquisa envia somente nome, nascimento e arquivo ao Apps Script e recebe até 150 candidatos. O servidor calcula a semelhança do nome (incluindo pequenos erros de digitação), prioriza nome exato e nascimento correspondente e devolve as pontuações. A porcentagem não é uma probabilidade de identidade.
+
+Em **Configurações → Modo de pesquisa**, é possível voltar a **Índices neste computador (modo anterior)**. Os índices locais anteriores são preservados. No modo servidor, o tempo total da requisição e o tempo interno do Google aparecem nas configurações e no registro de processamento.
+
+Este primeiro teste reaproveita o índice compartilhado do Apps Script, com validade de 15 minutos. A primeira consulta após perda/expiração desse cache ainda precisa preparar o índice no Google e pode demorar. Ainda não foi instalado um agendamento de pré-aquecimento; a comparação entre a primeira consulta e as seguintes orientará essa próxima decisão.
 
 Uma única entrada **Arquivo Digital** reúne as abas **Consultar Pasta**, **Incluir Pasta**, **Documentos Internos**, **Configurações** e **Ajuda**. Consulta e inclusão compartilham a busca e a pasta selecionada. Alternar abas mantém as páginas e classificações. Os atalhos antigos continuam compatíveis.
 
@@ -86,6 +92,14 @@ Os testes do backend simulam Sheets/Drive e verificam concorrência, retomada, i
 
 Uma nova caixa é inserida após a anterior na ordem de letra e número: A6 após A5, J9 após J8 e A11 após A10. Se a letra ainda não tiver caixas, a aba entra na posição alfabética correspondente. As abas existentes mantêm sua ordem. A correção é no Apps Script e não exige atualizar o userscript.
 
-## Primeiro carregamento e efeitos visuais — 0.14.1
+## Primeiro carregamento no modo local — 0.14.1
 
-No primeiro uso de cada computador/configuração, a tela permanece bloqueada até concluir os índices de Permanente e Formandos. A tela mostra um indicador circular e a contagem de nomes por arquivo. Se ocorrer uma falha, permite configurar a conexão ou tentar novamente, aproveitando o índice que já terminou; não há botão para ignorar essa etapa. Com os dois índices salvos, as próximas aberturas usam o cache imediatamente. A interface tem hover e transições suaves entre abas, respeitando a preferência de movimento reduzido do sistema.
+No modo local, no primeiro uso de cada computador/configuração, a tela permanece bloqueada até concluir os índices de Permanente e Formandos. A tela mostra um indicador circular e a contagem de nomes por arquivo. Se ocorrer uma falha, permite configurar a conexão ou tentar novamente, aproveitando o índice que já terminou; não há botão para ignorar essa etapa. Com os dois índices salvos, as próximas aberturas usam o cache imediatamente. A interface tem hover e transições suaves entre abas, respeitando a preferência de movimento reduzido do sistema.
+
+## Visualização de arquivos privados e consulta
+
+O botão **Visualizar** solicita o PDF autenticado ao Apps Script, que confere o vínculo com a pasta selecionada e devolve o conteúdo. O leitor do sistema usa PDF.js com navegação entre páginas, sem depender do login do Drive no navegador. Nenhuma permissão de compartilhamento é alterada. O limite desta visualização é 20 MB. **Abrir no Drive** continua exigindo acesso pela conta Google; **Abrir PDF em nova guia** usa a cópia temporária carregada no navegador. A chave de conexão autoriza o acesso no sistema; ainda não há contas individuais nem acesso a servidores.
+
+A consulta mostra uma camada semitransparente enquanto aguarda. Nas correspondências, clique em qualquer ponto da linha ou use Enter/Espaço na linha focada. O botão Selecionar continua disponível.
+
+Teste real de Permanente: preparação inicial do índice no servidor em 326,07 s; consultas seguintes em 0,925 s e 0,984 s internos. Esses tempos não incluem rede/navegador e não garantem o mesmo tempo em outros arquivos. O modo experimental aguarda até 390 s na requisição; continua sujeito ao limite de execução do Apps Script.

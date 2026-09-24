@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.14.1
+// @version      0.15.0
 // @description  Arquivo Digital com consulta e inclusão de pastas, documentos, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.14.1',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.15.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.14.1'
+            versao: '0.15.0'
         }
     ]);
 
@@ -78,7 +78,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.14.1',
+        version: '0.15.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -792,7 +792,7 @@
                 <div>Ação</div>
             </div>
             ${list.map((r, i) => `
-                <article class="match-card ${i === 0 && !simpleMode ? 'best' : ''}">
+                <article class="match-card ${i === 0 && !simpleMode ? 'best' : ''}" data-match-row="${i}" tabindex="0" role="group" aria-label="Selecionar ${escapeHtml(r.name)}, caixa ${escapeHtml(r.sheet)}">
                     <div class="match-name">
                         ${escapeHtml(r.name)}
                         <div style="margin-top:4px">
@@ -815,11 +815,16 @@
             `).join('')}
         `;
 
-        el.matchGrid.querySelectorAll('[data-match-index]').forEach(button => {
-            button.addEventListener('click', () => {
-                const match = list[Number(button.dataset.matchIndex)];
+        el.matchGrid.querySelectorAll('[data-match-row]').forEach(row => {
+            const select=()=>{
+                if(state.processing)return;
+                const match = list[Number(row.dataset.matchRow)];
                 selectStudentMatch(match, false);
                 modal.style.display = 'none';
+            };
+            row.addEventListener('click',select);
+            row.addEventListener('keydown',event=>{
+                if(event.target===row&&(event.key==='Enter'||event.key===' ')){event.preventDefault();select();}
             });
         });
 
@@ -869,7 +874,7 @@
             } else if (r.matchMode === 'contains') {
                 modeText = `contém “${escapeHtml(state.lastSearchTerm || el.studentName.value.trim())}”`;
             } else if (Number.isFinite(r.score)) {
-                modeText = `${Math.round(Math.min(1, r.score) * 100)}% de correspondência`;
+                modeText = `${Math.round(Math.min(1, r.score) * 100)}% de semelhança do nome`;
             }
 
             return `
@@ -1288,7 +1293,7 @@
                 </div>
                 <div class="document-actions">
                     <button class="primary" data-consult-preview="${index}">Visualizar</button>
-                    ${doc.url ? `<a class="ad-btn" href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">Abrir</a>` : ''}
+                    ${doc.url ? `<a class="ad-btn" href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">Abrir no Drive</a>` : ''}
                 </div>
             </article>
         `).join('');
@@ -1301,16 +1306,68 @@
         });
     }
 
-    function openConsultPreview(doc) {
-        const url = doc?.previewUrl || doc?.url;
-        if (!url) return alert('Este documento não possui uma URL de visualização.');
+    async function openConsultPreview(doc) {
+        if(!doc)return;
+        closeConsultPreview();
+        const request=state.previewRequest,match=state.selectedStudentMatch;
         el.docModalTitle.textContent = doc.name || doc.type || 'Visualização do documento';
-        el.docFrame.src = url;
-        el.docOpenNew.href = doc.url || url;
         el.docModal.style.display = 'flex';
+        el.docOpenNew.hidden=true;el.docFrame.hidden=true;
+        if(!el.docPreviewStatus){el.docPreviewStatus=document.createElement('div');el.docPreviewStatus.setAttribute('role','status');el.docPreviewStatus.style.cssText='padding:28px;font:14px Arial';el.docFrame.before(el.docPreviewStatus);}
+        el.docPreviewStatus.hidden=false;el.docPreviewStatus.replaceChildren(createLoadingSpinner(),document.createTextNode('Carregando PDF privado…'));
+        try{
+            let url=doc.previewUrl||doc.url,pdfBytes;
+            if(doc.source==='Google Drive'){
+                if(!match)throw new Error('Selecione uma pasta antes de visualizar.');
+                const data=parseDriveResponse(await drivePostJson({action:'getStudentDocument',documentId:doc.id,student:{root:match.root,name:match.name,birth:match.birth,physicalSheet:match.sheet,physicalRow:match.row,existingFolderUrl:match.folderUrl}}));
+                if(request!==state.previewRequest||match!==state.selectedStudentMatch)return;
+                if(!data.ok)throw new Error(data.error||'Não foi possível carregar o PDF.');
+                if(data.document?.mimeType!=='application/pdf'||!data.document.base64||data.document.base64.length>28*1024*1024)throw new Error('Resposta de documento inválida.');
+                const binary=atob(data.document.base64),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
+                url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));state.consultationObjectUrls.push(url);
+                pdfBytes=bytes;
+            }
+            if(!url)throw new Error('Documento sem conteúdo para visualização.');
+            if(request!==state.previewRequest)return;
+            el.docOpenNew.href=url;el.docOpenNew.textContent='Abrir PDF em nova guia';el.docOpenNew.hidden=false;
+            if(pdfBytes)await renderPrivatePdf(pdfBytes,request);
+            else{el.docFrame.src=url;el.docFrame.hidden=false;}
+            if(request===state.previewRequest)el.docPreviewStatus.hidden=true;
+        }catch(error){if(request===state.previewRequest)el.docPreviewStatus.textContent=error.message;}
+    }
+
+    async function renderPrivatePdf(bytes,request){
+        if(!window.pdfjsLib)throw new Error('O leitor de PDF não carregou. Atualize o script e a página.');
+        pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const pdf=await pdfjsLib.getDocument({data:bytes.slice()}).promise;
+        if(request!==state.previewRequest){await pdf.destroy();return;}
+        state.consultationPdf=pdf;
+        if(!el.docPdfViewer){
+            el.docPdfViewer=document.createElement('div');el.docPdfViewer.className='private-pdf-viewer';
+            el.docPdfViewer.innerHTML='<div class="private-pdf-nav"><button type="button" data-prev>Página anterior</button><span role="status"></span><button type="button" data-next>Próxima página</button></div><div class="private-pdf-page"><canvas></canvas></div>';
+            el.docFrame.before(el.docPdfViewer);
+        }
+        const viewer=el.docPdfViewer,canvas=viewer.querySelector('canvas'),previous=viewer.querySelector('[data-prev]'),next=viewer.querySelector('[data-next]'),status=viewer.querySelector('span');
+        viewer.hidden=false;let number=1;
+        const render=async pageNumber=>{
+            previous.disabled=true;next.disabled=true;
+            try{
+                const page=await pdf.getPage(pageNumber);if(request!==state.previewRequest)return;
+                const base=page.getViewport({scale:1}),width=Math.max(200,viewer.clientWidth-36),scale=Math.min(2,width/base.width);
+                const viewport=page.getViewport({scale});canvas.width=viewport.width;canvas.height=viewport.height;
+                await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+                if(request!==state.previewRequest)return;
+                number=pageNumber;status.textContent=`Página ${number} de ${pdf.numPages}`;previous.disabled=number===1;next.disabled=number===pdf.numPages;
+            }catch(error){if(request===state.previewRequest){status.textContent='Falha ao renderizar: '+error.message;throw error;}}
+        };
+        previous.onclick=()=>render(number-1).catch(console.warn);next.onclick=()=>render(number+1).catch(console.warn);
+        await render(1);
     }
 
     function closeConsultPreview() {
+        state.previewRequest=(state.previewRequest||0)+1;
+        state.consultationPdf?.destroy().catch(console.warn);state.consultationPdf=null;
+        if(el.docPdfViewer)el.docPdfViewer.hidden=true;
         if (!el.docModal) return;
         el.docModal.style.display = 'none';
         el.docFrame.src = 'about:blank';
@@ -1668,10 +1725,11 @@
         state.searchBusy=true;refreshSearchControls();
         el.searchStudentBtn.disabled = true;
         el.searchStudentBtn.textContent = 'Pesquisando...';
+        const searchLoading=showSearchLoading();
         renderStudentLocationStatus(`Consultando ${root} no Google Drive...`, '');
 
         try {
-            const response = await cachedStudentSearch({
+            const response = await searchStudentsRequest({
                 action: 'searchStudents',
                 clientVersion: APP.version,
                 root,
@@ -1696,10 +1754,17 @@
                 folderUrl: String(record.folderUrl || ''),
                 nameCol: Number(record.nameCol || 0) || null,
                 birthCol: Number(record.birthCol || 0) || null,
-                folderCol: Number(record.folderCol || 0) || null
+                folderCol: Number(record.folderCol || 0) || null,
+                score: Number(record.score),
+                exactName: record.exactName === true,
+                exactBirth: record.exactBirth === true,
+                matchMode: data.scored ? 'server' : record.matchMode
             })).filter(record => record.name && record.row > 0);
 
-            if (singleTermMode) {
+            if (data.scored) {
+                results=results.filter(record=>Number.isFinite(record.score)&&record.score>=0&&record.score<=1);
+                state.lastSearchMode='similarity';
+            } else if (singleTermMode) {
                 // Uma palavra: busca simples "contém", sem cálculo de similaridade.
                 results = results
                     .filter(record => record.normalizedName.includes(normalizedName))
@@ -1763,7 +1828,7 @@
                 'success'
             );
 
-            if (singleTermMode) {
+            if (singleTermMode && !data.scored) {
                 renderEmbeddedMatches(results);
                 renderStudentLocationStatus(
                     `${results.length} registro(s) online contendo “${name}”. Selecione pela data de nascimento, caixa e linha.`,
@@ -1800,7 +1865,19 @@
                 state.searchBusy=false;refreshSearchControls();
                 el.searchStudentBtn.textContent = oldButtonText;
             }
+            clearTimeout(searchLoading.slowTimer);searchLoading.remove();
+            if(el.app){el.app.inert=false;el.app.removeAttribute('aria-busy');}
         }
+    }
+
+    function showSearchLoading(){
+        const overlay=document.createElement('div');overlay.className='ad-search-loading';
+        overlay.setAttribute('role','status');overlay.setAttribute('aria-live','polite');
+        overlay.innerHTML='<section><strong>Pesquisando correspondências…</strong><p>Consultando os nomes. Aguarde um momento.</p></section>';
+        overlay.querySelector('section').prepend(createLoadingSpinner());document.body.append(overlay);
+        overlay.slowTimer=setTimeout(()=>{overlay.querySelector('p').textContent='O Google ainda está pesquisando. A primeira consulta com a lista desatualizada pode levar alguns minutos.';},15000);
+        if(el.app){el.app.inert=true;el.app.setAttribute('aria-busy','true');}
+        return overlay;
     }
 
     function selectStudentMatch(match, automatic) {
@@ -3018,7 +3095,7 @@
                 anonymous: true,
                 headers: { 'Content-Type': 'application/json;charset=UTF-8' },
                 data: JSON.stringify(data),
-                timeout: 180_000,
+                timeout: data.action==='searchStudents'?390_000:180_000,
                 onload: response => {
                     if (response.status >= 200 && response.status < 400) resolve(response);
                     else reject(new Error(driveHttpError(response.status)));
@@ -3387,6 +3464,22 @@
         GM_setValue(key, []); GM_setValue(key+':index:PERMANENTE',null); GM_setValue(key+':index:FORMANDOS',null);
     }
 
+    function serverSearchEnabled(){return GM_getValue('adig:searchMode','server')!=='local';}
+
+    async function searchStudentsRequest(payload,forceRefresh=false){
+        if(!serverSearchEnabled())return cachedStudentSearch(payload,forceRefresh);
+        const started=performance.now();
+        // Cada consulta vai ao servidor; o índice compartilhado nunca é baixado aqui.
+        const response=await drivePostJson({...payload,forceRefresh:false});
+        const data=parseDriveResponse(response);
+        if(data.ok){
+            const timing=`${((performance.now()-started)/1000).toFixed(1)} s no total · ${((data.elapsedMs||0)/1000).toFixed(2)} s no servidor`;
+            if(el.cacheStatus)el.cacheStatus.textContent='Busca no servidor · '+timing;
+            addLog('Busca no servidor: '+timing+(data.indexCacheHit?' · índice em cache.':' · índice preparado durante a consulta.'),'info');
+        }
+        return response;
+    }
+
     async function cachedStudentSearch(payload, forceRefresh = false) {
         const storeKey = await searchCacheKey();
         let index=GM_getValue(storeKey+':index:'+payload.root,null);
@@ -3645,13 +3738,13 @@
     }
     function refreshSearchControls() {
         const busy=Boolean(state.processing||state.searchBusy||state.syncingIndex);
-        for(const input of [el.archiveRoot,el.studentName,el.studentBirth,el.studentCode,el.searchStudentBtn,el.registerStudentBtn])if(input)input.disabled=busy;
+        for(const input of [el.archiveRoot,el.studentName,el.studentBirth,el.studentCode,el.searchStudentBtn,el.registerStudentBtn,el.searchMode])if(input)input.disabled=busy;
     }
 
     async function prepareSearchBackend() {
         state.indexSupported=false;state.changesSupported=false;
         if(!GM_getValue(APP.driveEndpointKey,'')||!GM_getValue(APP.driveTokenKey,''))return;
-        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));state.changesSupported=Boolean(data.ok&&data.capabilities?.includes('studentChanges'));if(state.indexSupported)queueIndexRefresh(el.archiveRoot.value);}
+        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));state.changesSupported=Boolean(data.ok&&data.capabilities?.includes('studentChanges'));if(state.indexSupported&&!serverSearchEnabled())queueIndexRefresh(el.archiveRoot.value);}
         catch(error){console.warn('Não foi possível verificar o serviço:',error.message);}
     }
 
@@ -3711,6 +3804,7 @@
     }
 
     async function queueIndexRefresh(root) {
+        if(serverSearchEnabled())return;
         try{
             if(!state.indexSupported)return;
             const key=await searchCacheKey(),id=key+':index:'+root,index=GM_getValue(id,null),now=Date.now();
@@ -3843,6 +3937,13 @@
     }
 
     function initializeStudentIndexes() {
+        if(serverSearchEnabled()){
+            state.initialIndexCheckPending=false;
+            document.getElementById(`${APP.id}-index-loading`)?.remove();
+            el.app.inert=false;setBusy(false);renderConsultStudentHero();
+            if(state.workspaceTab==='incluir'&&!state.workspacePreloaded){state.workspacePreloaded=true;queueMicrotask(preloadArchiveSystem);}
+            return Promise.resolve();
+        }
         if(state.indexBootPromise)return state.indexBootPromise;
         state.initialIndexCheckPending=true;
         let overlay=document.getElementById(`${APP.id}-index-loading`);
@@ -3911,6 +4012,25 @@
         map.config.panel.querySelector('.settings-connection').append(connection,el.driveConfigBtn);
         el.driveConfigBtn.textContent='Configurar conexão';
         const options=app.querySelector('.search-options');options.open=true;map.config.panel.querySelector('.settings-index').append(options);
+        const searchSettings=map.config.panel.querySelector('.settings-index');
+        searchSettings.querySelector('p').textContent='No modo servidor, envie apenas o nome e receba as correspondências. A porcentagem indica semelhança do nome; confira nascimento e caixa. Neste teste, a primeira consulta sem cache no Google pode levar alguns minutos; as seguintes reaproveitam a lista compartilhada.';
+        const modeLabel=document.createElement('label');modeLabel.textContent='Modo de pesquisa';modeLabel.htmlFor=`${APP.id}-search-mode`;
+        el.searchMode=document.createElement('select');el.searchMode.id=modeLabel.htmlFor;
+        el.searchMode.innerHTML='<option value="server">Busca no servidor (teste)</option><option value="local">Índices neste computador (modo anterior)</option>';
+        el.searchMode.value=serverSearchEnabled()?'server':'local';
+        const timing=document.createElement('p');timing.className='search-timing';timing.setAttribute('role','status');
+        searchSettings.insertBefore(modeLabel,options);searchSettings.insertBefore(el.searchMode,options);searchSettings.append(timing);
+        const applySearchMode=()=>{
+            const server=serverSearchEnabled();options.hidden=server;timing.hidden=!server;
+            (server?timing:options).append(el.cacheStatus);
+            el.cacheStatus.textContent=server?'Consultas no Google · sem sincronização inicial neste computador.':'Busca local · atualização automática em segundo plano.';
+        };
+        el.searchMode.onchange=()=>{
+            GM_setValue('adig:searchMode',el.searchMode.value);state.searchSequence=(state.searchSequence||0)+1;
+            state.selectedStudentMatch=null;state.lastSearchResults=[];el.searchResults.innerHTML='';renderStudentLocationStatus();
+            applySearchMode();initializeStudentIndexes();
+        };
+        applySearchMode();
         map.ajuda.panel.innerHTML='<div class="panel-heading"><div><h2>Ajuda</h2><p>Da localização da pasta ao envio dos documentos.</p></div></div><ol class="help-steps"><li><b>Localize a pasta.</b> Escolha o arquivo e pesquise pelo nome. Use a data de nascimento para distinguir nomes iguais.</li><li><b>Consulte ou inclua.</b> Em Consultar Pasta, carregue os documentos existentes. Em Incluir Pasta, cadastre quem ainda não consta na lista e escolha a caixa física.</li><li><b>Revise e salve.</b> Adicione PDFs ou fotos, use o OCR e confira a classificação. Quando uma folha tiver dois documentos, duplique a página e classifique cada cópia.</li></ol><p>A troca de abas mantém a seleção e as páginas carregadas. Use Rascunho para guardar um trabalho antes de fechar a página.</p>';
         if(help){help.open=true;help.querySelector('summary').textContent='Identificação de documentos';map.ajuda.panel.append(help);}
         map.internos.panel.innerHTML='<div class="reserved-area"><span class="area-tag">EM PREPARAÇÃO</span><h2>Documentos Internos</h2><p>Um espaço para os documentos administrativos da escola.</p><p>Esta área será habilitada com a configuração do acervo e do acesso restrito.</p></div>';
@@ -3941,6 +4061,20 @@
         app.querySelectorAll('label').forEach(label=>{const input=label.parentElement.querySelector('input,select');if(input?.id)label.htmlFor=input.id;});
         const style=document.createElement('style');style.textContent=`
             @keyframes ad-loading-spin{to{transform:rotate(360deg)}}
+            #${APP.id}-doc-modal{font:14px Arial;color:#20334b}
+            #${APP.id}-doc-modal [hidden]{display:none!important}
+            #${APP.id}-doc-modal button,#${APP.id}-doc-modal .ad-btn{border:1px solid #cbd7e5;border-radius:7px;padding:8px 12px;background:white;color:#254e78;cursor:pointer;margin:0 4px;text-decoration:none;font:13px Arial}
+            #${APP.id}-doc-modal button:hover{background:#eaf3ff}#${APP.id}-doc-modal button:disabled{opacity:.45;cursor:default}
+            #${APP.id}-doc-modal .private-pdf-viewer{min-height:0;display:flex;flex-direction:column;background:#e8edf3}
+            #${APP.id}-doc-modal .private-pdf-nav{display:flex;justify-content:center;align-items:center;padding:10px;gap:12px;background:#f8fafc}
+            #${APP.id}-doc-modal .private-pdf-page{flex:1;overflow:auto;text-align:center;padding:18px}
+            #${APP.id}-doc-modal canvas{max-width:100%;box-shadow:0 2px 12px #20334b22}
+            .ad-search-loading{position:fixed;inset:0;z-index:2147483400;display:grid;place-items:center;background:rgba(22,42,65,.32);backdrop-filter:blur(2px);font:14px Arial;color:#20334b}
+            .ad-search-loading section{display:flex;flex-direction:column;align-items:center;text-align:center;background:rgba(255,255,255,.96);padding:30px 38px;border:1px solid #dce5ef;border-radius:16px;box-shadow:0 18px 60px #0d253540;max-width:85vw}
+            .ad-search-loading strong{font-size:18px}.ad-search-loading p{color:#67788c;line-height:1.6;margin-bottom:0}
+            #${APP.id}-match-modal .match-card{cursor:pointer;transition:background-color .16s,border-color .16s,box-shadow .16s}
+            #${APP.id}-match-modal .match-card:hover{background:#eaf3ff;border-color:#8eb6df;box-shadow:0 3px 12px #234e7515}
+            #${APP.id}-match-modal .match-card:focus-visible{outline:3px solid #3685d5;outline-offset:-3px;background:#eaf3ff}
             @keyframes ad-panel-enter{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
             .ad-loading-spinner{width:46px;height:46px;border:4px solid #dce8f6;border-top-color:#2479d0;border-right-color:#73b1ec;border-radius:50%;animation:ad-loading-spin .85s linear infinite;margin:0 0 22px}
             .ad-index-loading{position:fixed;inset:0;z-index:2147483500;background:#f3f6fa;display:grid;place-items:center;font:14px Arial;color:#23334b}

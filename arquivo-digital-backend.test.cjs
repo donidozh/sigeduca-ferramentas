@@ -29,7 +29,7 @@ test('data diferente, homônimos ou ausência de cabeçalho bloqueiam escrita',(
  assert.throws(()=>c.resolveStudentRow_(sh,{name:'ALUNO',physicalRow:2},{headerRow:0,nameCol:0,birthCol:0}),/Cabeçalho/);
 });
 test('busca ordena nome/data exatos antes de limitar os resultados',()=>{
- const {c}=fixture();c.studentIndex_=()=>({version:'test',records:[{name:'MARIA OUTRA',birth:'01/01/2000',sheet:'1',row:2},{name:'MARIA SILVA',birth:'02/02/2001',sheet:'2',row:2}]});
+ const {c}=fixture();c.cachedIndex_=()=>null;c.studentIndex_=()=>({version:'test',records:[{name:'MARIA OUTRA',birth:'01/01/2000',sheet:'1',row:2},{name:'MARIA SILVA',birth:'02/02/2001',sheet:'2',row:2}]});
  const result=c.searchStudentsAction_({root:'PERMANENTE',query:'MARIA SILVA',birth:'02/02/2001',maxResults:1});assert.equal(result.results[0].name,'MARIA SILVA');assert.equal(result.truncated,true);
 });
 test('upload repetido confirma arquivo existente e não cria duplicata',()=>{
@@ -146,4 +146,26 @@ test('novas caixas entram após a anterior com ordenação numérica e preservam
   const {c,add,ss,sheets}=registrationFixture();names.forEach(name=>add(name));
   c.createArchiveBox_(ss,'PERMANENTE',created);assert.deepEqual(sheets.map(sheet=>sheet.getName()),expected);
  }
+});
+
+
+test('servidor classifica erros de digitação sem confundir porcentagem com nascimento',()=>{
+ const {c}=fixture();const records=[{name:'MARIA SILVA',birth:'01/01/2000',sheet:'M1',row:3},{name:'MARIA SOUZA',birth:'02/02/2000',sheet:'M2',row:3},{name:'JOSE PEREIRA',birth:'01/01/2000',sheet:'J1',row:3}];
+ c.cachedIndex_=()=>({records,version:'cached'});c.studentIndex_=()=>{throw Error('não deve reconstruir');};
+ const result=c.searchStudentsAction_({root:'PERMANENTE',query:'MRIA SLVA',birth:'01/01/2000'});
+ assert.equal(result.results[0].name,'MARIA SILVA');assert.equal(result.results[0].exactBirth,true);assert.ok(result.results[0].score>.7&&result.results[0].score<1);assert.equal(result.scored,true);assert.equal(result.indexCacheHit,true);
+ assert.equal(c.nameProximity_('MARIA SILVA','MARIA SILVA'),1);assert.ok(c.nameProximity_('MARIA MARIA','MARIA SILVA')<1);
+});
+
+
+test('visualização privada confere pasta antes de ler bytes e não altera compartilhamento',()=>{
+ const {c}=fixture();let read=0,allowed=false;
+ c.findStudentFolder_=()=>({getId:()=> 'folder-a'});
+ c.Utilities.base64Encode=b=>Buffer.from(b).toString('base64');
+ const file={getId:()=> 'pdf',getName:()=> 'documento.pdf',isTrashed:()=>false,getMimeType:()=> 'application/pdf',getSize:()=>8,getParents:()=>{let done=false;return {hasNext:()=>!done,next:()=>{done=true;return {getId:()=>allowed?'folder-a':'folder-b'};}};},getBlob:()=>{read++;return {getBytes:()=>[...Buffer.from('%PDF-abc')]};}};
+ c.DriveApp={getFileById:()=>file};const payload={student:{root:'PERMANENTE',name:'ALUNO'},documentId:'pdf'};
+ assert.throws(()=>c.getStudentDocumentAction_(payload),/não pertence/);assert.equal(read,0);
+ allowed=true;const result=c.getStudentDocumentAction_(payload);assert.equal(Buffer.from(result.document.base64,'base64').toString(),'%PDF-abc');assert.equal(read,1);
+ file.getSize=()=>21*1024*1024;assert.throws(()=>c.getStudentDocumentAction_(payload),/20 MB/);assert.equal(read,1);
+ file.getSize=()=>8;file.getMimeType=()=> 'text/html';assert.throws(()=>c.getStudentDocumentAction_(payload),/Somente PDF/);
 });
