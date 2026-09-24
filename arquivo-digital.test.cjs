@@ -11,7 +11,7 @@ function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -204,4 +204,30 @@ test('conferência periódica completa é atômica e não reativa índice incomp
  const key=await t.searchCacheKey(),id=key+':index:PERMANENTE';t.values.set(id,{createdAt:1,epoch:'old',fullSyncedAt:1,records:[{name:'OLD'}]});
  await assert.rejects(t.refreshStudentIndex('PERMANENTE'),/interrompida/);assert.equal(t.values.get(id).records[0].name,'OLD');
  fail=false;const updated=await t.refreshStudentIndex('PERMANENTE');assert.equal(updated.records.length,2);assert.equal(updated.epoch,'new');assert.equal(page,4);
+});
+
+
+test('reconstrução manual força leitura do arquivo escolhido nas configurações',async()=>{
+ const requests=[];const t=fixture(p=>{requests.push(p);return p.action==='ping'?{ok:true,capabilities:['studentIndex']}:{ok:true,version:'new',epoch:'new',results:[{name:'NOVA'}],nextOffset:null,total:1,createdAt:Date.now(),expiresAt:Date.now()+900000};});
+ t.el.archiveRoot={value:'PERMANENTE'};t.el.indexRoot={value:'FORMANDOS'};t.el.cacheStatus={};
+ const id=(await t.searchCacheKey())+':index:FORMANDOS';t.values.set(id,{records:[{name:'ANTIGA'}],createdAt:1,fullSyncedAt:Date.now(),epoch:'old'});
+ const button={textContent:'Reconstruir índice completo'};await t.syncStudentIndex(button);
+ assert.equal(requests[1].root,'FORMANDOS');assert.equal(requests[1].forceRefresh,true);assert.equal(t.values.get(id).records[0].name,'NOVA');assert.equal(t.el.archiveRoot.value,'PERMANENTE');assert.equal(button.disabled,false);assert.equal(t.el.indexRoot.disabled,false);
+});
+
+test('consulta atrasada não mostra documentos nem altera a pasta de outra pessoa',async()=>{
+ let release,started;const ready=new Promise(r=>started=r);const t=fixture(()=>{started();return new Promise(r=>release=r);});
+ const first={name:'ANA',folderUrl:'https://drive.google.com/drive/folders/a',root:'PERMANENTE'};
+ const next={name:'BEATRIZ',folderUrl:'https://drive.google.com/drive/folders/b',root:'PERMANENTE'};
+ t.state.selectedStudentMatch=first;t.el.consultDocuments={innerHTML:'PASTA NOVA'};
+ const pending=t.loadConsultDocuments();await ready;t.state.selectedStudentMatch=next;
+ release({ok:true,folderUrl:first.folderUrl,documents:[{id:'old',name:'Documento da Ana'}]});await pending;
+ assert.equal(next.folderUrl,'https://drive.google.com/drive/folders/b');assert.equal(t.el.consultDocuments.innerHTML,'PASTA NOVA');assert.equal(t.state.consultationDocuments.length,0);
+});
+
+test('trocar abas preserva páginas e seleção e mantém um único painel ativo',()=>{
+ const t=fixture();t.el.workspaceTabs=Object.fromEntries(['consulta','incluir','internos','config','ajuda'].map(k=>[k,{button:{setAttribute(){}},panel:{}}]));t.el.workspaceIdentity={};t.el.workspaceSidebar={};
+ const pages=[{id:'page',docKey:'ged_certidao'}],person={name:'ANA'};t.state.pageModels=pages;t.state.selectedStudentMatch=person;t.state.workspacePreloaded=true;
+ for(const key of Object.keys(t.el.workspaceTabs)){assert.equal(t.selectWorkspaceTab(key),true);assert.equal(Object.values(t.el.workspaceTabs).filter(x=>!x.panel.hidden).length,1);assert.equal(t.state.pageModels,pages);assert.equal(t.state.selectedStudentMatch,person);}
+ t.state.processing=true;assert.equal(t.selectWorkspaceTab('consulta'),false);assert.equal(t.state.workspaceTab,'ajuda');
 });

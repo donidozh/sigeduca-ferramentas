@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.13.0
-// @description  Arquivo Digital modular com Consulta e Upload; pesquisa de alunos diretamente no Google Sheets, OCR local e Google Drive.
+// @version      0.14.0
+// @description  Arquivo Digital com consulta e inclusão de pastas, documentos, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
 // @run-at       document-start
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.13.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.14.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -48,24 +48,14 @@
 
     const FERRAMENTAS = Object.freeze([
         {
-            id: 'arquivo-digital-consulta',
-            titulo: 'Arquivo Digital — Consulta',
-            url: 'hwmconaluno.aspx#arquivo-digital-consulta',
-            descricao: 'Consultar localização física, pasta digital e documentos do aluno',
+            id: 'arquivo-digital',
+            titulo: 'Arquivo Digital',
+            url: 'hwmconaluno.aspx#arquivo-digital',
+            descricao: 'Consultar pastas, cadastrar e organizar documentos',
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.13.0'
-        },
-        {
-            id: 'arquivo-digital-upload',
-            titulo: 'Arquivo Digital — Upload',
-            url: 'hwmconaluno.aspx#arquivo-digital-upload',
-            descricao: 'Digitalizar/importar, classificar e enviar documentos',
-            ordem: 31,
-            grupo: 'Secretaria',
-            grupoOrdem: 10,
-            versao: '0.13.0'
+            versao: '0.14.0'
         }
     ]);
 
@@ -88,7 +78,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.13.0',
+        version: '0.14.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -257,7 +247,8 @@
     }
 
     function ehPaginaArquivoDigital() {
-        return ehModoConsulta() || ehModoUpload();
+        return ehModoConsulta() || ehModoUpload() ||
+            (ehPaginaBaseArquivoDigital() && location.hash.toLowerCase() === '#arquivo-digital');
     }
 
     function quandoDOMPronto(fn) {
@@ -1195,204 +1186,12 @@
      * 5B. TELA DE CONSULTA — interface simples e separada do upload
      * ===================================================================== */
 
-    function buildConsultInterface() {
-        document.getElementById(`${APP.id}-app`)?.remove();
-        document.getElementById(`${APP.id}-doc-modal`)?.remove();
-
-        const app = document.createElement('div');
-        app.id = `${APP.id}-app`;
-        app.innerHTML = `
-            <div class="consult-shell">
-                <header class="ad-header">
-                    <div>
-                        <div class="ad-title">Arquivo Digital — Consulta</div>
-                        <div class="ad-subtitle">Localize o aluno, confira a caixa física e visualize os documentos digitais • v${APP.version}</div>
-                    </div>
-                    <div class="ad-header-actions">
-                        <button id="${APP.id}-load-lists" style="display:none" aria-hidden="true">Carregar lista local</button>
-                        <input type="file" id="${APP.id}-list-files" accept=".xlsx,.xls" multiple hidden>
-                        <button id="${APP.id}-drive-config">Configurar Drive</button>
-                        <button id="${APP.id}-close">Fechar</button>
-                    </div>
-                </header>
-
-                <section class="consult-search">
-                    <div>
-                        <label>Arquivo</label>
-                        <select id="${APP.id}-root">
-                            <option value="PERMANENTE">PERMANENTE</option>
-                            <option value="FORMANDOS">FORMANDOS</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Nome ou parte do nome</label>
-                        <input type="text" id="${APP.id}-name" placeholder="Ex.: Felipe">
-                    </div>
-                    <div>
-                        <label>Data de nascimento</label>
-                        <input type="text" id="${APP.id}-birth" placeholder="dd/mm/aaaa">
-                    </div>
-                    <div>
-                        <button class="primary" id="${APP.id}-search-student">Pesquisar</button>
-                    </div>
-                </section>
-
-                <div class="consult-main">
-                    <aside class="consult-left">
-                        <div class="section">
-                            <div class="section-title">Aluno / arquivo físico</div>
-                            <div class="section-body">
-                                <div id="${APP.id}-list-status" class="status-card status-warn">Pesquisa online: configure o Google Drive e digite o nome do aluno.</div>
-                                <div id="${APP.id}-search-results" class="search-results"></div>
-                            </div>
-                        </div>
-
-                        <div class="section">
-                            <div class="section-title">Acesso rápido</div>
-                            <div class="section-body">
-                                <button class="success" id="${APP.id}-load-folder" style="width:100%;display:none">📂 Carregar Pasta Digital</button>
-                                <button id="${APP.id}-open-folder" style="width:100%;margin-top:7px;display:none">Abrir pasta no Google Drive</button>
-                                <div class="tiny" id="${APP.id}-folder-help" style="margin-top:8px">
-                                    Se o aluno possuir pasta digital, o botão para carregá-la aparecerá aqui.
-                                </div>
-                            </div>
-                        </div>
-                    </aside>
-
-                    <main class="consult-content">
-                        <div id="${APP.id}-student-hero" class="student-hero">
-                            <h2>Nenhum aluno selecionado</h2>
-                            <div class="meta">Pesquise pelo nome e, de preferência, informe também a data de nascimento.</div>
-                        </div>
-
-                        <div class="consult-toolbar">
-                            <strong style="margin-right:auto">Documentos digitais</strong>
-                            <button id="${APP.id}-refresh-docs" disabled>↻ Atualizar</button>
-                            <button id="${APP.id}-test-local">Testar visualização com PDFs locais</button>
-                            <input type="file" id="${APP.id}-test-local-input" accept="application/pdf,.pdf" multiple hidden>
-                        </div>
-
-                        <div id="${APP.id}-consult-documents" class="empty-documents">
-                            <strong>Os documentos do aluno aparecerão aqui.</strong>
-                            <span class="tiny">Enquanto o Drive ainda não está conectado, use “Testar visualização com PDFs locais” para experimentar a nova interface.</span>
-                        </div>
-                    </main>
-                </div>
-            </div>
-
-            <input type="hidden" id="${APP.id}-code">
-        `;
-
-        const docModal = document.createElement('div');
-        docModal.id = `${APP.id}-doc-modal`;
-        docModal.innerHTML = `
-            <div class="doc-modal-box">
-                <div class="doc-modal-head">
-                    <strong id="${APP.id}-doc-modal-title">Visualização do documento</strong>
-                    <div style="display:flex;gap:7px">
-                        <a id="${APP.id}-doc-open-new" class="ad-btn" target="_blank" rel="noopener">Abrir em nova guia</a>
-                        <button id="${APP.id}-doc-modal-close">Fechar</button>
-                    </div>
-                </div>
-                <iframe id="${APP.id}-doc-frame" title="Visualização do documento"></iframe>
-            </div>
-        `;
-
-        document.body.append(app, docModal);
-
-        Object.assign(el, {
-            app,
-            historical: null,
-            archiveRoot: app.querySelector(`#${APP.id}-root`),
-            studentName: app.querySelector(`#${APP.id}-name`),
-            studentBirth: app.querySelector(`#${APP.id}-birth`),
-            studentCode: app.querySelector(`#${APP.id}-code`),
-            searchStudentBtn: app.querySelector(`#${APP.id}-search-student`),
-            loadListsBtn: app.querySelector(`#${APP.id}-load-lists`),
-            listFiles: app.querySelector(`#${APP.id}-list-files`),
-            listStatus: app.querySelector(`#${APP.id}-list-status`),
-            searchResults: app.querySelector(`#${APP.id}-search-results`),
-            driveConfigBtn: app.querySelector(`#${APP.id}-drive-config`),
-            closeBtn: app.querySelector(`#${APP.id}-close`),
-            studentHero: app.querySelector(`#${APP.id}-student-hero`),
-            loadFolderBtn: app.querySelector(`#${APP.id}-load-folder`),
-            openFolderBtn: app.querySelector(`#${APP.id}-open-folder`),
-            folderHelp: app.querySelector(`#${APP.id}-folder-help`),
-            refreshDocsBtn: app.querySelector(`#${APP.id}-refresh-docs`),
-            testLocalBtn: app.querySelector(`#${APP.id}-test-local`),
-            testLocalInput: app.querySelector(`#${APP.id}-test-local-input`),
-            consultDocuments: app.querySelector(`#${APP.id}-consult-documents`),
-            docModal,
-            docModalTitle: docModal.querySelector(`#${APP.id}-doc-modal-title`),
-            docFrame: docModal.querySelector(`#${APP.id}-doc-frame`),
-            docOpenNew: docModal.querySelector(`#${APP.id}-doc-open-new`),
-            docModalClose: docModal.querySelector(`#${APP.id}-doc-modal-close`)
-        });
-
-        bindConsultInterfaceEvents();
-        installSearchCacheControls();
-        renderStudentLocationStatus();
-        renderConsultStudentHero();
-    }
-
-    function bindConsultInterfaceEvents() {
-        el.closeBtn.addEventListener('click', () => {
-            revokeConsultationObjectUrls();
-            location.hash = '';
-            location.reload();
-        });
-
-        el.archiveRoot.addEventListener('change', () => {
-            state.selectedStudentMatch = null;
-            state.lastSearchResults = [];
-            el.searchResults.innerHTML = '';
-            renderStudentLocationStatus();
-            renderConsultStudentHero();
-            renderConsultDocuments([]);
-        });
-
-        el.loadListsBtn.addEventListener('click', () => el.listFiles.click());
-        el.listFiles.addEventListener('change', async event => {
-            const files = [...(event.target.files || [])];
-            if (files.length) await importListFiles(files);
-            event.target.value = '';
-        });
-
-        el.searchStudentBtn.addEventListener('click', searchStudentInLists);
-        el.studentName.addEventListener('keydown', event => {
-            if (event.key === 'Enter') searchStudentInLists();
-        });
-        el.studentBirth.addEventListener('keydown', event => {
-            if (event.key === 'Enter') searchStudentInLists();
-        });
-
-        el.driveConfigBtn.addEventListener('click', configureDriveEndpoint);
-
-        el.loadFolderBtn.addEventListener('click', loadConsultDocuments);
-
-        el.openFolderBtn.addEventListener('click', () => {
-            const url = state.selectedStudentMatch?.folderUrl;
-            if (url) window.open(url, '_blank', 'noopener');
-        });
-
-        el.refreshDocsBtn.addEventListener('click', loadConsultDocuments);
-
-        el.testLocalBtn.addEventListener('click', () => el.testLocalInput.click());
-        el.testLocalInput.addEventListener('change', event => {
-            const files = [...(event.target.files || [])].filter(file => file.type === 'application/pdf' || /\.pdf$/i.test(file.name));
-            if (files.length) loadLocalConsultDocuments(files);
-            event.target.value = '';
-        });
-
-        el.docModalClose.addEventListener('click', closeConsultPreview);
-        el.docModal.addEventListener('click', event => {
-            if (event.target === el.docModal) closeConsultPreview();
-        });
-    }
-
     function renderConsultStudentHero() {
         if (!el.studentHero) return;
         const match = state.selectedStudentMatch;
+        if(el.inclusionPerson)el.inclusionPerson.textContent=match
+            ? `Pasta selecionada: ${match.name} · ${match.root} · ${match.sheet}`
+            : 'Pesquise e selecione uma pasta ou cadastre um aluno antes de enviar ao Drive.';
         if (!match) {
             el.studentHero.innerHTML = `
                 <h2>Nenhum aluno selecionado</h2>
@@ -1471,8 +1270,8 @@
             el.consultDocuments.innerHTML = `
                 <strong>${escapeHtml(message || 'Nenhum documento listado.')}</strong>
                 <span class="tiny">${state.selectedStudentMatch?.folderUrl
-                    ? 'Você pode abrir a pasta digital pelo botão à esquerda. A listagem automática será usada quando o endpoint do Drive estiver ativo.'
-                    : 'Selecione um aluno com pasta digital ou teste a visualização com PDFs locais.'}</span>
+                    ? 'Use Carregar documentos para consultar o conteúdo da pasta no Drive.'
+                    : 'Pesquise pelo nome ou cadastre uma pasta na aba Incluir Pasta.'}</span>
             `;
             return;
         }
@@ -1553,7 +1352,7 @@
 
         if (!data.ok) throw new Error(data.error || data.message || 'Não foi possível consultar a pasta digital.');
 
-        if (data.folderUrl) {
+        if (data.folderUrl && state.selectedStudentMatch === match) {
             state.selectedStudentMatch.folderUrl = data.folderUrl;
             renderStudentLocationStatus();
             renderConsultStudentHero();
@@ -1604,6 +1403,7 @@
 
     async function loadConsultDocuments() {
         const match = state.selectedStudentMatch;
+        const request=state.consultationRequest=(state.consultationRequest||0)+1;
         if (!match) {
             renderConsultDocuments([], 'Selecione um aluno primeiro.');
             return;
@@ -1624,10 +1424,12 @@
 
         try {
             const docs = await fetchSelectedStudentDriveDocuments();
+            if(request!==state.consultationRequest||state.selectedStudentMatch!==match)return;
             state.consultationDocuments = docs;
             renderConsultDocuments(docs, 'Nenhum PDF encontrado na pasta digital.');
         } catch (error) {
             console.error(error);
+            if(request!==state.consultationRequest||state.selectedStudentMatch!==match)return;
             renderConsultDocuments([], `Falha ao consultar o Drive: ${error.message}`);
         } finally {
             if (el.loadFolderBtn) {
@@ -1638,6 +1440,7 @@
                 el.refreshDocsBtn.disabled = false;
                 el.refreshDocsBtn.textContent = '↻ Atualizar';
             }
+            renderConsultStudentHero();
         }
     }
 
@@ -2003,6 +1806,7 @@
     function selectStudentMatch(match, automatic) {
         if (state.processing) return;
         state.selectedStudentMatch = { ...match };
+        invalidateConsultation();
         invalidateBatch();
         scheduleDraft();
         el.archiveRoot.value = match.root;
@@ -2017,6 +1821,10 @@
     }
 
     function renderStudentLocationStatus(customMessage = '', type = '') {
+        if(el.workspaceTabs && state.consultationSelection!==state.selectedStudentMatch){
+            state.consultationSelection=state.selectedStudentMatch;
+            invalidateConsultation();
+        }
         if (!el.listStatus) return;
 
         if (customMessage) {
@@ -3102,7 +2910,6 @@
             throw new Error(ensureData.error || ensureData.message || 'Não foi possível preparar a pasta digital.');
         }
 
-        clearSearchCache().catch(console.warn);
         const folderId = ensureData.folderId;
         const folderUrl = ensureData.folderUrl;
 
@@ -3112,6 +2919,7 @@
             state.selectedStudentMatch.folderUrl = folderUrl || state.selectedStudentMatch.folderUrl;
             if (ensureData.folderCol) state.selectedStudentMatch.folderCol = ensureData.folderCol;
             if (ensureData.physicalRow) state.selectedStudentMatch.row = ensureData.physicalRow;
+            await cacheRegisteredStudent(state.selectedStudentMatch).catch(console.warn);
         }
 
         renderStudentLocationStatus();
@@ -3644,8 +3452,12 @@
         clear.onclick=()=>clearSearchCache().then(()=>el.cacheStatus.textContent='Cache removido.').catch(error=>showError(error));
         el.cacheStatus=document.createElement('small');el.cacheStatus.setAttribute('role','status');el.cacheStatus.style.display='block';el.cacheStatus.textContent='Busca local · atualização automática em segundo plano.';
         const options=document.createElement('details');options.className='search-options';options.innerHTML='<summary>Opções de busca</summary>';
-        const sync=document.createElement('button');sync.type='button';sync.textContent='Atualizar índice completo';sync.onclick=()=>syncStudentIndex(sync);
-        options.append(refresh,sync,clear,el.cacheStatus);container.append(options);
+        const sync=document.createElement('button');sync.type='button';sync.textContent='Reconstruir índice completo';sync.onclick=()=>syncStudentIndex(sync);
+        const rootLabel=document.createElement('label');rootLabel.textContent='Arquivo para reconstruir';
+        el.indexRoot=document.createElement('select');el.indexRoot.id=`${APP.id}-index-root`;rootLabel.htmlFor=el.indexRoot.id;
+        el.indexRoot.innerHTML='<option value="PERMANENTE">PERMANENTE</option><option value="FORMANDOS">FORMANDOS</option>';
+        const hint=document.createElement('p');hint.textContent='Relê todas as caixas do arquivo escolhido, ignorando os dados em cache. O índice anterior só é substituído após a conclusão. Pode levar alguns minutos.';
+        options.append(rootLabel,el.indexRoot,sync,hint,refresh,clear,el.cacheStatus);container.append(options);
         el.registerStudentBtn=document.createElement('button');el.registerStudentBtn.type='button';el.registerStudentBtn.textContent='Cadastrar aluno';
         el.registerStudentBtn.onclick=openStudentRegistration;container.append(el.registerStudentBtn);
     }
@@ -3847,7 +3659,7 @@
         do{
             if(indexGeneration(id)!==generation||storeKey!==await searchCacheKey())throw new Error('Atualização interrompida; dados locais preservados.');
             const progress='Sincronizando '+root+' · '+records.length+' nomes...';
-            if(el.cacheStatus&&el.archiveRoot.value===root)el.cacheStatus.textContent=progress;
+            if(el.cacheStatus&&(el.archiveRoot.value===root||(state.syncingIndex&&el.indexRoot?.value===root)))el.cacheStatus.textContent=progress;
 
             const data=parseDriveResponse(await drivePostJson({action:'getStudentIndex',root,offset,version,createdAt:snapshot?.createdAt,forceRefresh}));
             if(!data.ok)throw new Error(data.error||'Falha ao sincronizar.');
@@ -3914,7 +3726,10 @@
     async function syncStudentIndex(button) {
         if(state.processing||state.searchBusy||state.syncingIndex)return;
         state.syncingIndex=true;button.disabled=true;refreshSearchControls();
-        const root=el.archiveRoot.value;
+        const root=el.indexRoot?.value||el.archiveRoot.value;
+        if(el.indexRoot)el.indexRoot.disabled=true;
+        const label=button.textContent;button.textContent='Reconstruindo índice…';
+        el.cacheStatus.textContent='Iniciando reconstrução de '+root+'…';
         try{
             const ping=parseDriveResponse(await drivePostJson({action:'ping'}));
             state.indexSupported=ping.capabilities?.includes('studentIndex') || false;
@@ -3922,7 +3737,7 @@
             const index=await refreshStudentIndex(root,true);
             el.cacheStatus.textContent=index.records.length+' nomes disponíveis localmente em '+root+'.';
         }catch(error){el.cacheStatus.textContent=error.message;addLog(error.message,'warning');}
-        finally{state.syncingIndex=false;button.disabled=false;refreshSearchControls();}
+        finally{state.syncingIndex=false;button.disabled=false;button.textContent=label;if(el.indexRoot)el.indexRoot.disabled=false;refreshSearchControls();}
     }
 
 
@@ -3999,6 +3814,137 @@
         else{overlay.querySelector('.boot-retry').hidden=false;overlay.querySelector('.boot-message').textContent=failures.join(' • ')+' — Tente novamente ou continue com classificação manual.';}
     }
 
+    // As abas compartilham a seleção e os mesmos elementos do editor.
+    // Ocultar um painel nunca descarta páginas, rascunhos ou resultados.
+    function buildUnifiedInterface() {
+        buildUploadInterface();
+        const app=el.app;
+        app.classList.add('unified');
+        app.querySelector('.ad-subtitle').textContent='Gestão de pastas e documentos';
+        const tabs=[['consulta','Consultar Pasta'],['incluir','Incluir Pasta'],['internos','Documentos Internos'],['config','Configurações'],['ajuda','Ajuda']];
+        const nav=document.createElement('nav');nav.className='workspace-tabs';nav.setAttribute('role','tablist');nav.setAttribute('aria-label','Arquivo Digital');
+        const body=document.createElement('div');body.className='workspace-body';
+        const sidebar=app.querySelector('.ad-left');
+        const panels=document.createElement('div');panels.className='workspace-panels';
+        const map={};
+        for(const [key,label] of tabs){
+            const button=document.createElement('button');button.type='button';button.id=`${APP.id}-tab-${key}`;button.textContent=label;
+            button.setAttribute('role','tab');button.setAttribute('aria-controls',`${APP.id}-panel-${key}`);
+            const panel=document.createElement('section');panel.id=`${APP.id}-panel-${key}`;panel.className='workspace-panel';panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);
+            button.onclick=()=>selectWorkspaceTab(key);nav.append(button);panels.append(panel);map[key]={button,panel};
+        }
+        el.workspaceTabs=map;el.workspaceSidebar=sidebar;el.workspaceIdentity=app.querySelector('.ad-identity');
+        app.querySelector('.ad-header').after(nav);
+        const main=app.querySelector('.ad-main');main.replaceWith(body);body.append(sidebar,panels);
+        const inclusion=map.incluir.panel;
+        inclusion.innerHTML='<div class="panel-heading"><div><h2>Incluir Pasta</h2><p>Cadastre uma pasta ou adicione documentos à pessoa selecionada.</p></div><div class="registration-action"></div></div><div class="inclusion-person" role="status"></div>';
+        inclusion.querySelector('.registration-action').append(el.registerStudentBtn);
+        el.inclusionPerson=inclusion.querySelector('.inclusion-person');
+        inclusion.append(main.querySelector('.ad-center'));
+        const preferences=document.createElement('details');preferences.className='ged-preferences';preferences.innerHTML='<summary>Dados para envio ao SIGEDUCA / GED</summary><div class="ged-fields"></div>';
+        preferences.querySelector('div').append(el.historical.parentElement.parentElement,el.studentCode.parentElement);
+        inclusion.append(preferences,app.querySelector('.destination-box'),app.querySelector('.ad-footer'));
+        const summary=el.summary.closest('.section');inclusion.append(summary);
+        const help=sidebar.querySelector('details.section');
+        const connection=el.driveStatus.closest('.section');
+        map.config.panel.innerHTML='<div class="panel-heading"><div><h2>Configurações</h2><p>Conexão com o Google Drive e atualização das listas.</p></div></div><div class="settings-connection"></div><div class="settings-index"><h3>Listas e pesquisa</h3><p>A lista salva neste computador é reutilizada. As atualizações são verificadas em segundo plano.</p></div><div class="future-collections"><h3>Acervos</h3><p><b>Alunos</b> · disponível</p><p><b>Servidores contratados e efetivos</b> · em preparação</p><p>O acesso aos servidores será habilitado após a criação das planilhas e da proteção de acesso.</p></div>';
+        map.config.panel.querySelector('.settings-connection').append(connection,el.driveConfigBtn);
+        el.driveConfigBtn.textContent='Configurar conexão';
+        const options=app.querySelector('.search-options');options.open=true;map.config.panel.querySelector('.settings-index').append(options);
+        map.ajuda.panel.innerHTML='<div class="panel-heading"><div><h2>Ajuda</h2><p>Da localização da pasta ao envio dos documentos.</p></div></div><ol class="help-steps"><li><b>Localize a pasta.</b> Escolha o arquivo e pesquise pelo nome. Use a data de nascimento para distinguir nomes iguais.</li><li><b>Consulte ou inclua.</b> Em Consultar Pasta, carregue os documentos existentes. Em Incluir Pasta, cadastre quem ainda não consta na lista e escolha a caixa física.</li><li><b>Revise e salve.</b> Adicione PDFs ou fotos, use o OCR e confira a classificação. Quando uma folha tiver dois documentos, duplique a página e classifique cada cópia.</li></ol><p>A troca de abas mantém a seleção e as páginas carregadas. Use Rascunho para guardar um trabalho antes de fechar a página.</p>';
+        if(help){help.open=true;help.querySelector('summary').textContent='Identificação de documentos';map.ajuda.panel.append(help);}
+        map.internos.panel.innerHTML='<div class="reserved-area"><span class="area-tag">EM PREPARAÇÃO</span><h2>Documentos Internos</h2><p>Um espaço para os documentos administrativos da escola.</p><p>Esta área será habilitada com a configuração do acervo e do acesso restrito.</p></div>';
+        const collection=document.createElement('div');collection.innerHTML=`<label for="${APP.id}-collection">Acervo</label><select id="${APP.id}-collection"><option>Alunos</option><option disabled>Servidores contratados · em breve</option><option disabled>Servidores efetivos · em breve</option></select>`;
+        el.workspaceIdentity.prepend(collection);
+        el.searchStudentBtn.textContent='Pesquisar';
+        sidebar.querySelector('.section-title').textContent='Localização da pasta';
+        el.uploadFolderBox.classList.add('legacy-folder-box');
+        const consult=map.consulta.panel;
+        consult.innerHTML=`<div class="panel-heading"><div><h2>Consultar Pasta</h2><p>Localize a pasta e visualize seus documentos.</p></div><button type="button" class="primary" data-include>Incluir documentos</button></div><div id="${APP.id}-student-hero" class="student-hero"></div><div class="consult-toolbar"><button id="${APP.id}-load-folder" class="primary">Carregar documentos</button><button id="${APP.id}-open-folder">Abrir pasta no Drive</button><button id="${APP.id}-refresh-docs">Atualizar</button></div><div id="${APP.id}-consult-documents"></div>`;
+        for(const [key,id] of Object.entries({studentHero:'student-hero',loadFolderBtn:'load-folder',openFolderBtn:'open-folder',refreshDocsBtn:'refresh-docs',consultDocuments:'consult-documents'}))el[key]=consult.querySelector(`#${APP.id}-${id}`);
+        consult.querySelector('[data-include]').onclick=()=>selectWorkspaceTab('incluir');
+        el.loadFolderBtn.onclick=loadConsultDocuments;el.refreshDocsBtn.onclick=loadConsultDocuments;
+        el.openFolderBtn.onclick=()=>{if(state.selectedStudentMatch?.folderUrl)window.open(state.selectedStudentMatch.folderUrl,'_blank','noopener');};
+        const modal=document.createElement('div');modal.id=`${APP.id}-doc-modal`;
+        modal.innerHTML=`<div class="doc-modal-box"><div class="doc-modal-head"><strong id="${APP.id}-doc-modal-title">Documento</strong><div><a id="${APP.id}-doc-open-new" class="ad-btn" target="_blank" rel="noopener">Abrir em nova guia</a><button id="${APP.id}-doc-modal-close">Fechar</button></div></div><iframe id="${APP.id}-doc-frame" title="Visualização do documento"></iframe></div>`;
+        document.body.append(modal);el.docModal=modal;
+        for(const [key,id] of Object.entries({docModalTitle:'doc-modal-title',docOpenNew:'doc-open-new',docModalClose:'doc-modal-close',docFrame:'doc-frame'}))el[key]=modal.querySelector(`#${APP.id}-${id}`);
+        el.docModalClose.onclick=closeConsultPreview;modal.onclick=event=>{if(event.target===modal)closeConsultPreview();};
+        modal.addEventListener('keydown',event=>{if(event.key==='Escape')closeConsultPreview();});
+        for(const field of [el.studentName,el.studentBirth,el.archiveRoot])field.addEventListener(field===el.archiveRoot?'change':'input',invalidateConsultation);
+        nav.addEventListener('keydown',event=>{
+            const keys=tabs.map(([key])=>key),index=keys.indexOf(state.workspaceTab);
+            const next=event.key==='ArrowRight'?(index+1)%keys.length:event.key==='ArrowLeft'?(index+keys.length-1)%keys.length:event.key==='Home'?0:event.key==='End'?keys.length-1:-1;
+            if(next<0)return;event.preventDefault();if(selectWorkspaceTab(keys[next]))map[keys[next]].button.focus();
+        });
+        // Associa os rótulos existentes aos campos para teclado e leitores de tela.
+        app.querySelectorAll('label').forEach(label=>{const input=label.parentElement.querySelector('input,select');if(input?.id)label.htmlFor=input.id;});
+        const style=document.createElement('style');style.textContent=`
+            #${APP.id}-app.unified{font-size:14px;background:#f3f5f8}
+            #${APP.id}-app.unified [hidden]{display:none!important}
+            #${APP.id}-app.unified .ad-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+            #${APP.id}-app.unified .ad-header{padding:20px 24px 20px 64px;background:#142b45;color:#fff;flex-shrink:0}
+            #${APP.id}-app.unified .ad-title{font-size:23px;letter-spacing:-.5px}
+            #${APP.id}-app.unified .ad-subtitle{color:#c4d2e2;font-size:12px;margin-top:5px}
+            #${APP.id}-app.unified .workspace-tabs{display:flex;gap:6px;padding:0 24px;background:white;border-bottom:1px solid #dce3ec;overflow-x:auto;flex-shrink:0}
+            #${APP.id}-app.unified .workspace-tabs button{white-space:nowrap;border:0;border-bottom:3px solid transparent;border-radius:0;padding:17px 14px;background:none;font-size:13px;font-weight:600}
+            #${APP.id}-app.unified .workspace-tabs button[aria-selected=true]{color:#1767bb;border-bottom-color:#1767bb;background:#f4f8fd}
+            #${APP.id}-app.unified button:focus-visible{outline:3px solid #70aafa;outline-offset:2px}
+            #${APP.id}-app.unified .ad-identity,#${APP.id}-app.unified .ad-identity.without-ged{padding:18px 24px;grid-template-columns:140px 160px minmax(180px,1fr) 145px auto;gap:14px;flex-shrink:0}
+            #${APP.id}-app.unified label{font-size:11px;text-transform:none;color:#536175}
+            #${APP.id}-app.unified input[type=text],#${APP.id}-app.unified select{font-size:13px;min-height:40px}
+            #${APP.id}-app.unified .workspace-body{flex:1;min-height:0;display:flex;overflow:auto}
+            #${APP.id}-app.unified .ad-left{width:285px;flex-shrink:0;padding:20px 16px;background:#f8fafc;overflow:auto}
+            #${APP.id}-app.unified .workspace-panels{flex:1;min-width:0;overflow:auto;padding:24px}
+            #${APP.id}-app.unified .workspace-panel{max-width:1500px;margin:auto}
+            #${APP.id}-app.unified .panel-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
+            #${APP.id}-app.unified h2{font-size:21px;letter-spacing:-.35px;margin:0 0 8px;color:#20334b}
+            #${APP.id}-app.unified h3{font-size:15px;margin:0 0 12px}
+            #${APP.id}-app.unified p{font-size:13px;line-height:1.6;color:#657186;margin:4px 0 12px}
+            #${APP.id}-app.unified .section-title{font-size:12px;padding:12px}
+            #${APP.id}-app.unified .status-card{font-size:12px;overflow-wrap:anywhere}
+            #${APP.id}-app.unified .tiny{font-size:12px}
+            #${APP.id}-app.unified .legacy-folder-box{display:none!important}
+            #${APP.id}-app.unified .ad-center{padding:0;overflow:visible}
+            #${APP.id}-app.unified .dropzone{background:white;padding:24px;margin-bottom:18px}
+            #${APP.id}-app.unified .inclusion-person{padding:12px 16px;margin-bottom:18px;background:#eaf1f8;border-radius:8px;font-size:13px;color:#314b69}
+            #${APP.id}-app.unified .ged-preferences{background:white;padding:14px;border:1px solid #dce3ec;border-radius:10px;margin:16px 0}
+            #${APP.id}-app.unified .ged-fields{display:flex;gap:24px;margin-top:14px;align-items:end}
+            #${APP.id}-app.unified .destination-box{padding:16px;border:1px solid #dce3ec;border-radius:10px}
+            #${APP.id}-app.unified .ad-footer{padding:16px 0;background:none;border:0;gap:16px}
+            #${APP.id}-app.unified .settings-connection,#${APP.id}-app.unified .settings-index,#${APP.id}-app.unified .future-collections{background:white;border:1px solid #dce3ec;border-radius:12px;padding:20px;margin-bottom:20px;max-width:850px}
+            #${APP.id}-app.unified .search-options button{margin:12px 8px 12px 0}
+            #${APP.id}-app.unified .help-steps{padding-left:22px;max-width:850px;line-height:1.8;color:#44536a}
+            #${APP.id}-app.unified .help-steps li{padding-left:6px;margin-bottom:18px}
+            #${APP.id}-app.unified .reserved-area{max-width:650px;margin:50px auto;padding:36px;background:white;border:1px solid #dce3ec;border-radius:16px}
+            #${APP.id}-app.unified .area-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:1px;color:#6b7d93;margin-bottom:20px}
+            @media(max-width:1000px){#${APP.id}-app.unified .ad-identity,#${APP.id}-app.unified .ad-identity.without-ged{grid-template-columns:repeat(2,minmax(0,1fr))}#${APP.id}-app.unified .ad-left{width:240px}#${APP.id}-app.unified .workspace-panels{padding:18px}}
+            @media(max-width:700px){#${APP.id}-app.unified .workspace-body{display:block}#${APP.id}-app.unified .ad-left{width:auto;border-right:0;overflow:visible;padding:12px}#${APP.id}-app.unified .workspace-panels{overflow:visible;padding:16px}#${APP.id}-app.unified .panel-heading{align-items:start;flex-direction:column}#${APP.id}-app.unified .workspace-tabs{padding:0 8px}#${APP.id}-app.unified .ad-identity{padding:12px}#${APP.id}-app.unified .ad-footer{flex-wrap:wrap}#${APP.id}-app.unified .ged-fields{flex-wrap:wrap}#${APP.id}-app.unified .reserved-area{margin:12px auto;padding:24px}}
+        `;document.head.append(style);
+        renderStudentLocationStatus();invalidateConsultation();
+        selectWorkspaceTab(ehModoUpload()?'incluir':'consulta');
+    }
+
+    function selectWorkspaceTab(key) {
+        if(!el.workspaceTabs?.[key]||state.processing)return false;
+        state.workspaceTab=key;
+        for(const [name,{button,panel}] of Object.entries(el.workspaceTabs)){
+            const active=name===key;panel.hidden=!active;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;
+        }
+        const withSearch=key==='consulta'||key==='incluir';
+        el.workspaceIdentity.hidden=!withSearch;el.workspaceSidebar.hidden=!withSearch;
+        renderConsultStudentHero();
+        if(key==='incluir'&&!state.workspacePreloaded){state.workspacePreloaded=true;queueMicrotask(preloadArchiveSystem);}
+        return true;
+    }
+
+    function invalidateConsultation() {
+        state.consultationRequest=(state.consultationRequest||0)+1;
+        state.consultationDocuments=[];revokeConsultationObjectUrls();
+        if(el.docModal)closeConsultPreview();
+        renderConsultDocuments([], 'Selecione uma pasta e carregue seus documentos.');renderConsultStudentHero();
+    }
+
     function init() {
         if (state.initialized && document.getElementById(`${APP.id}-app`)) return;
         state.initialized = true;
@@ -4006,17 +3952,9 @@
 
         injectStyles();
 
-        if (ehModoConsulta()) {
-            document.title = 'Arquivo Digital — Consulta';
-            buildConsultInterface();
-            addLog(`Arquivo Digital — Consulta v${APP.version} inicializado.`, 'success');
-        } else if (ehModoUpload()) {
-            document.title = 'Arquivo Digital — Upload';
-            buildUploadInterface();
-            queueMicrotask(preloadArchiveSystem);
-            addLog(`Arquivo Digital — Upload v${APP.version} inicializado.`, 'success');
-            addLog('O upload foi simplificado: consulta e visualização agora ficam em uma ferramenta separada.', 'info');
-        }
+        document.title = 'Arquivo Digital';
+        buildUnifiedInterface();
+        addLog(`Arquivo Digital v${APP.version} inicializado.`, 'success');
 
         console.info(`[Arquivo Digital] v${APP.version} inicializado em ${location.hash}.`);
     }

@@ -35,16 +35,16 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Ações em Lote (Turmas) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js) | Menu Ferramentas |
 | Consulta Alunos em Lote | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-alunos-lote.user.js) | Menu Ferramentas |
 | Extrair Dados Pessoais | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrair-dados-pessoais.user.js) | Menu Ferramentas |
-| Arquivo Digital do Aluno | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js) | Menu Ferramentas |
+| Arquivo Digital | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js) | Menu Ferramentas |
 | Relação de Alunos e Planilha Online - Por Turma (Com Atestados) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/relacao-alunos-planilha.user.js) | Tela específica |
 | Extrator de Matrícula Certidão | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrator-certidao.user.js) | Tela específica |
 | Exportar notas fiscais para CSV | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpo/notas-fiscais-csv.user.js) | Tela específica |
 
-O Arquivo Digital registra duas entradas no menu (consulta e upload), mas é um único script. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
+O Arquivo Digital tem uma única entrada no menu e cinco abas: Consultar Pasta, Incluir Pasta, Documentos Internos, Configurações e Ajuda. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
 
 ## Termos de Compromisso
 
-Consulte também as [novidades e orientações do Arquivo Digital 0.13.0](ged/arquivo-digital.md): cadastro em caixas, seleção obrigatória antes do envio, duplicação de páginas, lista única e identificação local de documentos.
+Consulte também as [novidades e orientações do Arquivo Digital 0.14.0](ged/arquivo-digital.md): cadastro em caixas, seleção obrigatória antes do envio, duplicação de páginas, lista única e identificação local de documentos.
 
 Disponível em **Ferramentas → Adicionar ferramentas → Termos de Compromisso**. Usa a mesma página-base de Requerimentos, preservando o campo de código e a lupa nativa do aluno, com uma página separada para emissão de termos.
 

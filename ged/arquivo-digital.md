@@ -1,4 +1,10 @@
-# Arquivo Digital 0.13.0
+# Arquivo Digital 0.14.0
+
+Uma única entrada **Arquivo Digital** reúne as abas **Consultar Pasta**, **Incluir Pasta**, **Documentos Internos**, **Configurações** e **Ajuda**. Consulta e inclusão compartilham a busca e a pasta selecionada. Alternar abas mantém as páginas e classificações. Os atalhos antigos continuam compatíveis.
+
+Servidores contratados, efetivos e documentos internos estão apenas sinalizados como áreas em preparação; seu acesso ainda depende das futuras planilhas e da proteção no serviço.
+
+Em **Configurações → Listas e pesquisa → Reconstruir índice completo**, escolha Permanente ou Formandos. A reconstrução ignora o cache do serviço, relê todas as caixas e só substitui o índice local após concluir. Se falhar, o índice anterior é preservado. O andamento aparece na mesma seção. Isso não altera a pasta selecionada.
 
 O sistema exige um aluno selecionado da planilha antes de enviar ao Drive ou ao GED. Se ainda não existir, use **Cadastrar aluno**: informe nome e nascimento, escolha uma caixa da inicial do nome ou **Abrir nova caixa**. Todas as caixas ficam disponíveis; o técnico escolhe conforme o espaço físico. O serviço confere duplicidade, insere o cadastro e prepara a pasta digital com seu vínculo. Se a preparação da pasta falhar, o cadastro é preservado e uma nova tentativa conclui o vínculo.
 
@@ -20,11 +26,11 @@ O script reúne consulta de alunos e organização de documentos. Instale ou atu
 
 ## Busca rápida
 
-A versão 0.13.0 mantém o índice de nomes neste navegador entre recarregamentos. A tela de carregamento espera somente PDF e OCR; a busca de nomes se prepara em segundo plano. Quando já existe um índice, as consultas usam os dados locais imediatamente, inclusive durante atualização ou falha de conexão. Antes de enviar, o serviço continua conferindo a identidade e a posição atual do aluno na planilha.
+A versão 0.13.0 mantém o índice de nomes neste navegador entre recarregamentos. Ao abrir Incluir Pasta pela primeira vez, a tela de carregamento prepara PDF e OCR; a busca de nomes se prepara em segundo plano. Quando já existe um índice, as consultas usam os dados locais imediatamente, inclusive durante atualização ou falha de conexão. Antes de enviar, o serviço continua conferindo a identidade e a posição atual do aluno na planilha.
 
 Cadastrar um aluno acrescenta ou atualiza somente esse registro no cache. Com o backend 1.4.0, cada computador confere alterações do serviço a cada dois minutos enquanto a tela está aberta e o usuário não está processando documentos. Sem novidades, a resposta não lê planilhas. Com novidades, baixa as caixas alteradas e preserva as demais. A atualização não substitui a seleção que o técnico está usando.
 
-Edições feitas diretamente no Google Sheets entram em uma conferência completa após uma hora desde a última leitura completa, em segundo plano. Para antecipar, use **Opções de busca → Atualizar busca** ou **Atualizar índice completo**. A primeira sincronização, um histórico de alterações perdido, muitas caixas alteradas ou a limpeza do cache ainda exigem uma leitura completa. O índice antigo permanece disponível até o novo terminar, e dados parciais não substituem o cache. O primeiro uso sem índice precisa aguardar essa leitura para pesquisar localmente.
+Edições feitas diretamente no Google Sheets entram em uma conferência completa após uma hora desde a última leitura completa, em segundo plano. Para antecipar, use **Configurações → Opções de busca → Atualizar busca** ou **Reconstruir índice completo**. A primeira sincronização, um histórico de alterações perdido, muitas caixas alteradas ou a limpeza do cache ainda exigem uma leitura completa. O índice antigo permanece disponível até o novo terminar, e dados parciais não substituem o cache. O primeiro uso sem índice precisa aguardar essa leitura para pesquisar localmente.
 
 Consultas avulsas, usadas quando o serviço não oferece índice, continuam em cache por 15 minutos. **Limpar cache** apaga os índices e consultas locais da configuração atual. Serviço e chave de acesso diferentes usam caches separados.
 

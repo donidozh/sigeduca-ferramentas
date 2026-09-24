@@ -99,10 +99,11 @@
     },
     {
       "id": "arquivo-digital-aluno",
-      "titulo": "Arquivo Digital do Aluno",
-      "descricao": "Consulta e envio de documentos. Requer configurar os serviços da escola.",
+      "titulo": "Arquivo Digital",
+      "descricao": "Consulta, cadastro de pastas e organização de documentos em uma única tela.",
       "arquivo": "ged/arquivo-digital-aluno.user.js",
       "registros": [
+        "arquivo-digital",
         "arquivo-digital-consulta",
         "arquivo-digital-upload"
       ],
