@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.9.2
+// @version      0.10.0
 // @description  Arquivo Digital modular com Consulta e Upload; pesquisa de alunos diretamente no Google Sheets, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.9.2',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.10.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.9.0'
+            versao: '0.10.0'
         },
         {
             id: 'arquivo-digital-upload',
@@ -65,7 +65,7 @@
             ordem: 31,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.9.0'
+            versao: '0.10.0'
         }
     ]);
 
@@ -88,7 +88,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.9.0',
+        version: '0.10.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -199,6 +199,11 @@
         pdfjsDocument: null,
         pageModels: [],
         generatedDocuments: [],
+        undoStack: [],
+        sourceNames: [],
+        batchSignature: '',
+        draftTimer: null,
+        draftQueue: Promise.resolve(),
         listIndexes: {
             PERMANENTE: [],
             FORMANDOS: []
@@ -263,7 +268,7 @@
         });
     }
 
-    iniciarSeNecessario();
+    queueMicrotask(iniciarSeNecessario);
     window.addEventListener('hashchange', iniciarSeNecessario);
 
     /* =====================================================================
@@ -413,6 +418,7 @@
         });
         if (el.cancelBtn) el.cancelBtn.style.display = busy ? '' : 'none';
         atualizarBotoes();
+        refreshSearchControls();
     }
 
     function showError(error, prefix = '') {
@@ -1000,19 +1006,19 @@
 
                     <main class="ad-center">
                         <div id="${APP.id}-dropzone" class="dropzone">
-                            <strong>Selecione ou arraste um PDF digitalizado</strong>
-                            <span class="tiny">Depois classifique as páginas ou use a identificação automática para PDFs que já possuem texto.</span>
+                            <strong>Adicione PDFs ou fotos do aluno</strong>
+                            <span class="tiny">Novos arquivos são acrescentados ao trabalho atual. Aceita PDF, JPG e PNG.</span>
                             <div class="row">
-                                <button class="primary" id="${APP.id}-choose-pdf">Selecionar PDF</button>
+                                <button class="primary" id="${APP.id}-choose-pdf">Adicionar arquivos</button>
                                 <button id="${APP.id}-auto-detect" disabled>🤖 Identificar / OCR</button>
                                 <button id="${APP.id}-accept-ai" disabled>Aceitar sugestões ≥ 85%</button>
                             </div>
-                            <input type="file" accept="application/pdf,.pdf" id="${APP.id}-pdf" hidden>
+                            <input type="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png" id="${APP.id}-pdf" multiple hidden>
                         </div>
                         <div id="${APP.id}-pages" class="pages"></div>
                     </main>
 
-                    <aside class="ad-right" aria-hidden="true">
+                    <aside class="ad-right">
                         <div id="${APP.id}-generated"></div>
                         <div id="${APP.id}-log"></div>
                     </aside>
@@ -1090,6 +1096,7 @@
         });
 
         bindUploadInterfaceEvents();
+        installWorkspaceTools();
         atualizarDriveStatus();
         setOcrStatus(
             state.ocrWorker
@@ -1142,8 +1149,7 @@
 
         el.choosePdfBtn.addEventListener('click', () => el.pdfInput.click());
         el.pdfInput.addEventListener('change', async event => {
-            const file = event.target.files?.[0];
-            if (file) await loadSourcePdf(file);
+            await importSourceFiles([...(event.target.files || [])]);
             event.target.value = '';
         });
 
@@ -1156,17 +1162,17 @@
             el.dropzone.classList.remove('active');
         }));
         el.dropzone.addEventListener('drop', async event => {
-            const file = [...(event.dataTransfer?.files || [])].find(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
-            if (!file) return alert('Arraste um arquivo PDF válido.');
-            await loadSourcePdf(file);
+            await importSourceFiles([...(event.dataTransfer?.files || [])]);
         });
 
-        el.autoDetectBtn.addEventListener('click', autoDetectAllPages);
+        el.autoDetectBtn.addEventListener('click', identifyDocumentsOneClick);
         el.acceptAiBtn.addEventListener('click', acceptAiSuggestions);
-        el.executeBtn.addEventListener('click', executeDestinations);
+        el.executeBtn.addEventListener('click', () => executeDestinations());
         el.clearBtn.addEventListener('click', () => clearAll(true));
         el.cancelBtn.addEventListener('click', () => {
             state.cancelled = true;
+            stopLocalAi();
+            if(state.ocrWorker){state.ocrWorker.terminate();state.ocrWorker=null;state.ocrWorkerPromise=null;}
             addLog('Cancelamento solicitado.', 'warning');
         });
 
@@ -1316,6 +1322,7 @@
         });
 
         bindConsultInterfaceEvents();
+        installSearchCacheControls();
         renderStudentLocationStatus();
         renderConsultStudentHero();
     }
@@ -1634,6 +1641,7 @@
         el.autoDetectBtn.disabled = state.processing || !state.pageModels.length;
         el.acceptAiBtn.disabled = state.processing || !state.pageModels.some(p => p.aiSuggestion?.confidence >= 0.85);
         el.choosePdfBtn.disabled = state.processing;
+        if (el.retryBtn) el.retryBtn.disabled = state.processing || !state.generatedDocuments.length;
         el.clearBtn.disabled = state.processing;
     }
 
@@ -1804,10 +1812,15 @@
         return '';
     }
 
-    async function searchStudentInLists() {
+    async function searchStudentInLists(forceRefresh = false) {
+        if (state.processing || state.searchBusy || state.syncingIndex) return;
+        if (!validateBirthInput()) return;
+        forceRefresh = forceRefresh === true;
+        const searchId = state.searchSequence = (state.searchSequence || 0) + 1;
         const name = el.studentName.value.trim();
         const birth = parseDateFlexible(el.studentBirth.value.trim());
         const root = el.archiveRoot.value;
+        const searchIsCurrent = () => searchId === state.searchSequence && name === el.studentName.value.trim() && root === el.archiveRoot.value && birth === parseDateFlexible(el.studentBirth.value.trim());
 
         state.selectedStudentMatch = null;
         state.lastSearchResults = [];
@@ -1841,19 +1854,21 @@
         state.lastSearchTerm = normalizedName;
 
         const oldButtonText = el.searchStudentBtn.textContent;
+        state.searchBusy=true;refreshSearchControls();
         el.searchStudentBtn.disabled = true;
         el.searchStudentBtn.textContent = 'Pesquisando...';
         renderStudentLocationStatus(`Consultando ${root} no Google Drive...`, '');
 
         try {
-            const response = await drivePostJson({
+            const response = await cachedStudentSearch({
                 action: 'searchStudents',
                 clientVersion: APP.version,
                 root,
                 query: name,
                 birth: birth || '',
                 maxResults: singleTermMode ? 150 : 100
-            });
+            }, forceRefresh);
+            if (!searchIsCurrent()) return;
 
             const data = parseDriveResponse(response);
             if (!data.ok) {
@@ -1932,7 +1947,7 @@
             }
 
             addLog(
-                `${root}: ${results.length} resultado(s) recebido(s) diretamente do Google Sheets` +
+                `${root}: ${results.length} resultado(s) ${response.fromCache ? 'do cache local' : 'do Google Sheets'}` +
                 (data.elapsedMs ? ` em ${(data.elapsedMs / 1000).toFixed(1)} s.` : '.'),
                 'success'
             );
@@ -1965,17 +1980,23 @@
             showMatchChooser(results);
 
         } catch (error) {
+            if (!searchIsCurrent()) return;
             console.error(error);
             renderStudentLocationStatus(`Falha na pesquisa online: ${error.message}`, 'warn');
             addLog(`Pesquisa Google Sheets: ${error.message}`, 'error');
         } finally {
-            el.searchStudentBtn.disabled = false;
-            el.searchStudentBtn.textContent = oldButtonText;
+            if (searchId === state.searchSequence) {
+                state.searchBusy=false;refreshSearchControls();
+                el.searchStudentBtn.textContent = oldButtonText;
+            }
         }
     }
 
     function selectStudentMatch(match, automatic) {
+        if (state.processing) return;
         state.selectedStudentMatch = { ...match };
+        invalidateBatch();
+        scheduleDraft();
         el.archiveRoot.value = match.root;
         el.studentName.value = match.name;
         if (match.birth) el.studentBirth.value = match.birth;
@@ -2034,58 +2055,7 @@
      * 7. PDF / MINIATURAS
      * ===================================================================== */
 
-    async function loadSourcePdf(file) {
-        if (state.processing) return;
-        if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-            return alert('Selecione um arquivo PDF.');
-        }
-        if (file.size > APP.maxPdfSize) {
-            return alert(`PDF com ${humanSize(file.size)}. Limite desta versão: ${humanSize(APP.maxPdfSize)}.`);
-        }
-
-        try {
-            clearPdfOnly();
-            state.sourceFile = file;
-            state.sourceBytes = new Uint8Array(await file.arrayBuffer());
-            if (!el.studentCode.value) el.studentCode.value = inferStudentCode(file.name);
-
-            addLog(`PDF selecionado: ${file.name} (${humanSize(file.size)}).`);
-            updateProgress(2, 'Abrindo PDF...');
-
-            if (!window.pdfjsLib) throw new Error('PDF.js não carregado.');
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            state.pdfjsDocument = await pdfjsLib.getDocument({ data: state.sourceBytes.slice() }).promise;
-
-            state.pageModels = Array.from({ length: state.pdfjsDocument.numPages }, (_, index) => ({
-                id: crypto.randomUUID ? crypto.randomUUID() : `p-${Date.now()}-${index}`,
-                originalPage: index + 1,
-                docKey: 'ignore',
-                rotation: 0,
-                thumbnailDataUrl: '',
-                extractedText: '',
-                aiSuggestion: null,
-                ocrUsed: false
-            }));
-
-            el.pages.innerHTML = '';
-            for (let i = 0; i < state.pageModels.length; i++) {
-                if (state.cancelled) break;
-                const model = state.pageModels[i];
-                updateProgress(5 + ((i + 1) / state.pageModels.length) * 45, `Miniatura ${i + 1}/${state.pageModels.length}`);
-                model.thumbnailDataUrl = await renderPageToDataUrl(model.originalPage, model.rotation, APP.thumbnailScale);
-                appendPageCard(model);
-                await sleep(0);
-            }
-
-            updatePageLabels();
-            updateSummary();
-            updateProgress(50, `${state.pageModels.length} página(s) carregada(s).`);
-            atualizarBotoes();
-        } catch (error) {
-            showError(error, 'Não foi possível abrir o PDF');
-            clearPdfOnly();
-        }
-    }
+    async function loadSourcePdf(file) { return importSourceFiles([file]); }
 
     async function renderPageToDataUrl(pageNumber, rotation = 0, scale = APP.thumbnailScale) {
         const page = await state.pdfjsDocument.getPage(pageNumber);
@@ -2107,7 +2077,7 @@
         return groups.map(([groupKey, label]) => {
             const options = Object.entries(DOCUMENT_TYPES)
                 .filter(([, meta]) => meta.group === groupKey)
-                .map(([key, meta]) => `<option value="${key}" ${key === selected ? 'selected' : ''}>${escapeHtml(meta.label)}</option>`)
+                .map(([key, meta]) => `<option value="${key}" title="${escapeHtml(meta.label)}" ${key === selected ? 'selected' : ''}>${escapeHtml(meta.short)}</option>`)
                 .join('');
             return options ? `<optgroup label="${label}">${options}</optgroup>` : '';
         }).join('');
@@ -2120,8 +2090,8 @@
         card.dataset.pageId = model.id;
         card.innerHTML = `
             <div class="page-head">
-                <strong>Posição</strong>
-                <span>Original ${model.originalPage}</span>
+                <label><input type="checkbox" class="page-check" aria-label="Selecionar página ${model.originalPage}"> <strong>Posição</strong></label>
+                <span title="${escapeHtml(model.sourceName || '')}">Original ${model.originalPage}</span>
             </div>
             <div class="thumb-wrap"><img class="thumb" src="${model.thumbnailDataUrl}" alt="Página ${model.originalPage}"></div>
             <select class="page-select">${makeDocumentOptions(model.docKey)}</select>
@@ -2135,7 +2105,12 @@
 
         const select = card.querySelector('.page-select');
         select.addEventListener('change', () => {
+            if (state.processing) return;
+            rememberEdit();
+            model.manual = true;
+            model.reviewed = true;
             model.docKey = select.value;
+            scheduleDraft();
             state.generatedDocuments = [];
             renderGeneratedSummary();
             updateSummary();
@@ -2144,18 +2119,24 @@
 
         card.addEventListener('click', async event => {
             const action = event.target.closest('[data-action]')?.dataset.action;
-            if (!action) return;
+            if (!action || state.processing) return;
             if (action === 'preview') await previewPage(model);
             if (action === 'rotate') await rotatePage(model, card);
             if (action === 'ignore') {
+                rememberEdit();
+                model.manual = true;
+                model.reviewed = true;
+                invalidateBatch();
                 model.docKey = 'ignore';
+                scheduleDraft();
                 select.value = 'ignore';
                 updateSummary();
                 atualizarBotoes();
             }
         });
 
-        card.addEventListener('dragstart', () => {
+        card.addEventListener('dragstart', event => {
+            if (state.processing) { event.preventDefault(); return; }
             state.draggedPageId = model.id;
             card.style.opacity = '.45';
         });
@@ -2176,6 +2157,7 @@
         });
 
         el.pages.appendChild(card);
+        renderAiSuggestion(model);
     }
 
     function updatePageLabels() {
@@ -2186,11 +2168,13 @@
     }
 
     function reorderPages(sourceId, targetId) {
-        if (!sourceId || sourceId === targetId) return;
+        if (state.processing || !sourceId || sourceId === targetId) return;
         const from = state.pageModels.findIndex(p => p.id === sourceId);
         const to = state.pageModels.findIndex(p => p.id === targetId);
         if (from < 0 || to < 0) return;
+        rememberEdit();
         const [moved] = state.pageModels.splice(from, 1);
+        scheduleDraft();
         state.pageModels.splice(to, 0, moved);
 
         const card = el.pages.querySelector(`[data-page-id="${CSS.escape(sourceId)}"]`);
@@ -2205,6 +2189,9 @@
     }
 
     async function rotatePage(model, card) {
+        if (state.processing) return;
+        rememberEdit();
+        setBusy(true);
         try {
             model.rotation = (model.rotation + 90) % 360;
             model.thumbnailDataUrl = await renderPageToDataUrl(model.originalPage, model.rotation, APP.thumbnailScale);
@@ -2214,7 +2201,7 @@
             atualizarBotoes();
         } catch (error) {
             showError(error, 'Erro ao girar página');
-        }
+        } finally { setBusy(false); scheduleDraft(); }
     }
 
     async function previewPage(model) {
@@ -2232,6 +2219,7 @@
     }
 
     function updateSummary() {
+        applyPageFilter();
         if (!state.pageModels.length) {
             el.summary.textContent = 'Nenhuma página carregada.';
             return;
@@ -2332,7 +2320,7 @@
 
         model.ocrUsed = false;
 
-        if (text.length >= 20) {
+        if (normalizeLoose(text).replace(/[^a-z]/g, '').length >= 40) {
             return text;
         }
 
@@ -2341,6 +2329,7 @@
 
         setOcrStatus(`Executando OCR na página ${model.originalPage}...`, 'loading');
         const result = await worker.recognize(canvas);
+        canvas.width = canvas.height = 0;
         text = String(result?.data?.text || '').trim();
         model.ocrUsed = true;
 
@@ -2369,6 +2358,7 @@
                 const text = await readPageTextWithOcr(model);
                 model.extractedText = text;
                 model.aiSuggestion = classifyText(text);
+                scheduleDraft();
 
                 if (model.ocrUsed) ocrCount++;
                 else nativeTextCount++;
@@ -2401,10 +2391,10 @@
             let points = 0;
             const hits = [];
 
-            for (const keyword of meta.keywords || []) {
-                const k = normalizeLoose(keyword);
+            for (const k of new Set((meta.keywords || []).map(normalizeLoose))) {
+                const keyword = k;
                 if (!k) continue;
-                if (normalized.includes(k)) {
+                if ((` ${normalized.replace(/[^a-z0-9]+/g, ' ')} `).includes(` ${k} `)) {
                     const weight = k.split(/\s+/).length >= 2 ? 18 : 7;
                     points += weight;
                     hits.push(keyword);
@@ -2450,6 +2440,7 @@
         const margin = best.points - second;
         let confidence = Math.min(0.99, 0.35 + best.points / 120 + margin / 180);
         if (best.points < 18) confidence = Math.min(confidence, 0.55);
+        if (margin < 15) confidence = Math.min(confidence, 0.70);
 
         return { key: best.key, confidence, hits: best.hits.slice(0, 5), points: best.points };
     }
@@ -2459,13 +2450,24 @@
         if (!card) return;
         const line = card.querySelector('.ai-line');
         const suggestion = model.aiSuggestion;
+        if (model.manual) {
+            line.className = 'ai-line';
+            line.textContent = 'Classificação manual';
+            return;
+        }
         if (!suggestion) {
             line.className = 'ai-line';
-            line.textContent = '🤖 Sem análise automática';
+            line.textContent = '';
             return;
         }
 
         const meta = DOCUMENT_TYPES[suggestion.key] || DOCUMENT_TYPES.arquivo_diversos;
+        if(suggestion.engine){
+            line.className='ai-line '+(suggestion.autoApply?'ai-high':'ai-mid');
+            line.textContent=`${meta.short} · ${suggestion.reason}`;
+            line.title=suggestion.engine==='local-ai'?'Análise semântica executada neste computador; os escores não são probabilidades.':'Somente palavras-chave: a IA não foi executada nesta página.';
+            return;
+        }
         const pct = Math.round((suggestion.confidence || 0) * 100);
         line.className = `ai-line ${pct >= 85 ? 'ai-high' : pct >= 60 ? 'ai-mid' : ''}`;
         line.textContent = model.extractedText.trim().length < 20
@@ -2474,9 +2476,11 @@
     }
 
     function acceptAiSuggestions() {
+        if (state.processing) return;
+        rememberEdit();
         let accepted = 0;
         for (const model of state.pageModels) {
-            if (!model.aiSuggestion || model.aiSuggestion.confidence < 0.85) continue;
+            if (model.manual || !model.aiSuggestion || model.aiSuggestion.confidence < 0.85) continue;
             model.docKey = model.aiSuggestion.key;
             const card = el.pages.querySelector(`[data-page-id="${CSS.escape(model.id)}"]`);
             if (card) card.querySelector('.page-select').value = model.docKey;
@@ -2486,7 +2490,8 @@
         renderGeneratedSummary();
         updateSummary();
         atualizarBotoes();
-        addLog(`${accepted} sugestão(ões) com confiança ≥ 85% aplicada(s).`, 'success');
+        scheduleDraft();
+        addLog(`${accepted} sugestão(ões) aplicada(s); escolhas manuais preservadas.`, 'success');
     }
 
     /* =====================================================================
@@ -2525,7 +2530,7 @@
             const copiedPages = await output.copyPages(sourcePdf, pages.map(p => p.originalPage - 1));
             copiedPages.forEach((copiedPage, index) => {
                 const rotation = pages[index].rotation || 0;
-                if (rotation) copiedPage.setRotation(PDFLib.degrees(rotation));
+                copiedPage.setRotation(PDFLib.degrees(rotation));
                 output.addPage(copiedPage);
             });
 
@@ -2565,6 +2570,7 @@
     }
 
     function renderGeneratedSummary() {
+        if (el.resultsPanel) el.resultsPanel.hidden = !state.generatedDocuments.length;
         if (!state.generatedDocuments.length) {
             el.generated.textContent = 'Os PDFs serão gerados automaticamente ao salvar.';
             return;
@@ -2581,6 +2587,7 @@
                 <div class="summary-row">
                     <span title="${escapeHtml(doc.docName)}">${escapeHtml(doc.shortName)}<br><small>${doc.pages.length} pág. • ${humanSize(doc.file.size)}</small></span>
                     <strong>${badges}</strong>
+                    ${doc.message ? `<small>${escapeHtml(doc.message)}</small>` : ''}
                 </div>
             `;
         }).join('');
@@ -2590,57 +2597,66 @@
      * 10. DESTINOS
      * ===================================================================== */
 
-    async function executeDestinations() {
+    async function executeDestinations(retry = false) {
         if (state.processing) return;
-
-        const useGed = el.destGed.checked;
-        const useLocal = el.destLocal.checked;
-        const useDrive = el.destDrive.checked;
+        if (!validateBirthInput()) return;
+        const useGed = el.destGed.checked, useLocal = el.destLocal.checked, useDrive = el.destDrive.checked;
         if (!useGed && !useLocal && !useDrive) return alert('Selecione pelo menos um destino.');
-
         const selectedPages = state.pageModels.filter(p => p.docKey !== 'ignore');
-        if (!state.sourceBytes || !selectedPages.length) return alert('Carregue o PDF e classifique ao menos uma página.');
-
-        const student = getStudentMeta();
-        if (!student.name && !student.code) return alert('Informe ao menos o nome ou o código do aluno.');
-
-        const selectedHasGedTypes = selectedPages.some(p => Number.isInteger(DOCUMENT_TYPES[p.docKey]?.gedId));
-        if (useGed && selectedHasGedTypes && !/^\d+$/.test(student.code)) {
-            return alert('Para enviar documentos ao GED, informe um código SIGEDUCA numérico. Alunos históricos podem usar apenas Computador/Drive.');
-        }
-
+        if (!state.sourceBytes || !selectedPages.length) return alert('Adicione arquivos e classifique ao menos uma página.');
+        let student = getStudentMeta();
+        if (!student.name && !student.code) return alert('Informe o nome ou código do aluno.');
+        if (useGed && selectedPages.some(p => Number.isInteger(DOCUMENT_TYPES[p.docKey]?.gedId)) && !/^\d+$/.test(student.code)) return alert('Informe um código SIGEDUCA numérico para enviar ao GED.');
+        if (useDrive && (!GM_getValue(APP.driveEndpointKey, '') || !GM_getValue(APP.driveTokenKey, ''))) return alert('Configure o Google Drive antes de enviar.');
+        let signature = currentBatchSignature();
+        if (retry && signature !== state.batchSignature) return alert('O aluno ou as páginas mudaram. Use Revisar e salvar para preparar um novo envio.');
         setBusy(true);
         state.cancelled = false;
-
         try {
-            updateProgress(66, 'Gerando os documentos necessários para os destinos...');
-            await generateGroupedDocuments();
-
-            if (useLocal) {
-                updateProgress(86, 'Gerando PDF único para o computador...');
-                await saveLocalSinglePdf();
+            if (useDrive && state.selectedStudentMatch) {
+                await refreshSelectedStudent();
+                student = getStudentMeta();
+                signature = currentBatchSignature();
+                // Updating the physical row/folder does not invalidate confirmed document deliveries.
+                if (state.generatedDocuments.length) state.batchSignature = signature;
             }
-
+            if (!state.generatedDocuments.length || state.batchSignature !== signature) {
+                await generateGroupedDocuments();
+                state.batchSignature = signature;
+            }
             if (useGed) {
-                updateProgress(90, 'Enviando documentos compatíveis ao GED...');
-                await startGedUpload();
+                for (const doc of state.generatedDocuments.filter(d => Number.isInteger(d.gedId) && d.file.size > APP.maxGeneratedFileSize && !isDestinationDone(d.statusGed))) {
+                    if (!await offerCompression(doc)) {
+                        updateProgress(85, 'Envio não iniciado. Revise os documentos grandes.');
+                        return;
+                    }
+                }
             }
-
-            if (useDrive) {
-                updateProgress(96, 'Enviando ao Google Drive...');
-                await saveToDriveEndpoint();
+            if (state.cancelled || !await reviewBeforeSave({ useGed, useLocal, useDrive, student })) return;
+            if (state.cancelled) return;
+            if (useLocal && state.generatedDocuments.some(d => !isDestinationDone(d.statusLocal))) {
+                try { await saveLocalSinglePdf(); }
+                catch (error) { for (const doc of state.generatedDocuments) { doc.statusLocal = '✗ Download'; doc.message = error.message; } }
             }
-
-            updateProgress(100, 'Processo concluído.');
-            addLog('Geração e salvamento nos destinos concluídos.', 'success');
-        } catch (error) {
-            showError(error, 'Falha ao processar destinos');
-        } finally {
-            setBusy(false);
-            renderGeneratedSummary();
-            atualizarBotoes();
-        }
+            if (useGed && !state.cancelled) await startGedUpload();
+            if (useDrive && !state.cancelled) {
+                try { await saveToDriveEndpoint(); }
+                catch (error) {
+                    for (const doc of state.generatedDocuments.filter(d => !isDestinationDone(d.statusDrive))) {
+                        doc.statusDrive ||= '✗ Drive'; doc.message = error.message;
+                    }
+                    addLog(error.message, 'error');
+                }
+            }
+            const result = summarizeDestinations(state.generatedDocuments, { useGed, useLocal, useDrive });
+            const message = `${result.sent} envio(s) confirmado(s), ${result.downloads} download(s) solicitado(s), ${result.existing} já cadastrado(s), ${result.failed} erro(s), ${result.pending} pendente(s).`;
+            updateProgress(state.cancelled ? 95 : 100, message);
+            addLog(message, result.failed || result.pending ? 'warning' : 'success');
+            el.resultStatus.textContent = message;
+        } catch (error) { showError(error, 'Processamento interrompido'); }
+        finally { setBusy(false); renderGeneratedSummary(); atualizarBotoes(); scheduleDraft(); }
     }
+
 
     async function saveLocalSinglePdf() {
         if (!window.PDFLib?.PDFDocument) throw new Error('pdf-lib não carregado.');
@@ -2656,7 +2672,7 @@
         // Usa exatamente a ordem atual da interface e respeita as rotações feitas pelo usuário.
         copiedPages.forEach((copiedPage, index) => {
             const rotation = selectedPages[index].rotation || 0;
-            if (rotation) copiedPage.setRotation(PDFLib.degrees(rotation));
+            copiedPage.setRotation(PDFLib.degrees(rotation));
             output.addPage(copiedPage);
         });
 
@@ -2674,8 +2690,8 @@
         const blob = new Blob([bytes], { type: 'application/pdf' });
         downloadBlob(blob, filename);
 
-        for (const doc of state.generatedDocuments) doc.statusLocal = '✓ PC — PDF único';
-        addLog(`PDF único salvo no computador: ${filename} (${selectedPages.length} pág., ${humanSize(blob.size)}).`, 'success');
+        for (const doc of state.generatedDocuments) doc.statusLocal = '✓ Download solicitado';
+        addLog(`Download do PDF único solicitado: ${filename} (${selectedPages.length} pág., ${humanSize(blob.size)}).`, 'success');
         renderGeneratedSummary();
     }
 
@@ -2685,7 +2701,7 @@
 
     async function startGedUpload() {
         const student = getStudentMeta();
-        const docs = state.generatedDocuments.filter(d => Number.isInteger(d.gedId));
+        const docs = state.generatedDocuments.filter(d => Number.isInteger(d.gedId) && !isDestinationDone(d.statusGed));
         if (!docs.length) {
             addLog('Nenhum dos documentos preparados possui tipo compatível com o GED.', 'warning');
             return;
@@ -2698,15 +2714,17 @@
 
             try {
                 const iframe = await openStudentPage(student.code);
-                await uploadDocumentToGed(iframe, doc);
-                doc.statusGed = '✓ GED';
+                const result = await uploadDocumentToGed(iframe, doc);
+                doc.statusGed = result === 'existing' ? '↷ Já cadastrado no GED' : '✓ GED';
+                doc.message = '';
             } catch (error) {
-                doc.statusGed = '✗ GED';
+                doc.statusGed = state.cancelled ? 'Pendente — cancelado' : '✗ GED';
                 doc.message = error.message;
                 addLog(`${doc.shortName} / GED: ${error.message}`, 'error');
             }
 
             renderGeneratedSummary();
+            scheduleDraft();
             await sleep(APP.betweenUploadsMs);
         }
     }
@@ -2808,11 +2826,12 @@
         let doc = await waitForUploadForm(iframe);
         const existing = findExistingDocument(doc, generated.gedId);
         if (existing.exists) {
-            throw new Error(`Documento GED ${generated.gedId} já cadastrado${existing.filename ? ` como “${existing.filename}”` : ''}.`);
+            addLog(`${generated.shortName}: já cadastrado no GED; preservado.`, 'info');
+            return 'existing';
         }
 
         if (generated.file.size > APP.maxGeneratedFileSize) {
-            addLog(`${generated.shortName}: ${humanSize(generated.file.size)}, acima do limite de 5 MB do GED. Tentando mesmo assim.`, 'warning');
+            throw new Error(`${generated.shortName}: acima de 5 MB. Reduza o PDF antes do envio.`);
         }
 
         const select = doc.getElementById('vGEDDOCOBRIGID');
@@ -2949,6 +2968,7 @@
         const response = await drivePostJson({ action: 'ping' });
         const data = parseDriveResponse(response);
         if (!data.ok) throw new Error(data.error || 'O serviço respondeu com erro.');
+        state.indexSupported=Boolean(data.capabilities?.includes('studentIndex'));
         addLog(`Drive conectado: ${data.message || 'serviço disponível.'}`, 'success');
         if (el.driveStatus) {
             el.driveStatus.className = 'status-card status-ok';
@@ -3009,6 +3029,7 @@
             throw new Error(ensureData.error || ensureData.message || 'Não foi possível preparar a pasta digital.');
         }
 
+        clearSearchCache().catch(console.warn);
         const folderId = ensureData.folderId;
         const folderUrl = ensureData.folderUrl;
 
@@ -3024,10 +3045,16 @@
         renderConsultStudentHero();
         updateUploadFolderControls();
 
+        state.batchSignature = currentBatchSignature();
         for (let i = 0; i < state.generatedDocuments.length; i++) {
             if (state.cancelled) throw new Error('Cancelado pelo usuário.');
 
             const doc = state.generatedDocuments[i];
+            if (isDestinationDone(doc.statusDrive)) continue;
+            if (doc.statusDrive?.startsWith('?')) {
+                if (!confirm(`${doc.shortName}: o envio anterior ao Drive ficou sem confirmação. Confira a pasta antes de repetir para evitar duplicata. Deseja reenviar este documento?`)) continue;
+            }
+            try {
             updateProgress(
                 96 + ((i + 1) / state.generatedDocuments.length) * 3,
                 `Drive: ${doc.shortName} (${i + 1}/${state.generatedDocuments.length})`
@@ -3035,6 +3062,7 @@
 
             const uploadResponse = await drivePostJson({
                 action: 'uploadDocument',
+                requestId: doc.requestId || (doc.requestId=crypto.randomUUID()),
                 clientVersion: APP.version,
                 folderId,
                 student: studentPayload(student),
@@ -3043,7 +3071,8 @@
                     docName: doc.docName,
                     filename: doc.file.name,
                     mimeType: 'application/pdf',
-                    base64: await fileToBase64(doc.file)
+                    base64: await fileToBase64(doc.file),
+                    sha256: await fileSha256(doc.file)
                 }
             });
 
@@ -3054,12 +3083,21 @@
                 throw new Error(uploadData.error || `Erro ao enviar ${doc.shortName}.`);
             }
 
-            doc.statusDrive = '✓ Drive';
+            doc.statusDrive = uploadData.duplicate ? '↷ Já recebido no Drive' : '✓ Drive';
+            doc.message = '';
+            } catch (error) {
+                if (!doc.statusDrive?.startsWith('✗')) doc.statusDrive = '? Drive — conferir pasta';
+                doc.message = error.message;
+                addLog(`${doc.shortName} / Drive: ${error.message}`, 'error');
+            }
             renderGeneratedSummary();
+            scheduleDraft();
         }
 
+        state.batchSignature=currentBatchSignature();
+        scheduleDraft();
         const warning = ensureData.warning ? ` Aviso: ${ensureData.warning}` : '';
-        addLog(`Drive: ${state.generatedDocuments.length} documento(s) enviado(s).${warning}`, 'success');
+        addLog(`Drive: ${state.generatedDocuments.filter(d => d.statusDrive === '✓ Drive').length} documento(s) confirmado(s).${warning}`, 'info');
     }
 
     function drivePostJson(data) {
@@ -3100,7 +3138,11 @@
     function clearPdfOnly() {
         state.sourceFile = null;
         state.sourceBytes = null;
+        state.pdfjsDocument?.destroy().catch(console.warn);
         state.pdfjsDocument = null;
+        state.sourceNames = [];
+        state.undoStack = [];
+        state.batchSignature = '';
         state.pageModels = [];
         state.generatedDocuments = [];
         state.cancelled = false;
@@ -3125,7 +3167,696 @@
         el.searchResults.innerHTML = '';
         renderStudentLocationStatus();
         updateUploadFolderControls();
+        clearTimeout(state.draftTimer);
+        queueDraftWrite(null).catch(error => addLog(`Não foi possível apagar o rascunho: ${error.message}`, 'warning'));
+        state.draftDirty=false;
+        if (el.draftStatus) el.draftStatus.textContent = 'Rascunho removido.';
         addLog('Tela limpa.');
+    }
+
+    // Editing, recovery and delivery helpers. All draft data remains in this browser.
+    function isDestinationDone(status) { return /^[✓↷]/u.test(status || ''); }
+
+    function summarizeDestinations(docs, destinations) {
+        const result = { sent: 0, downloads: 0, existing: 0, failed: 0, pending: 0 };
+        for (const doc of docs) {
+            for (const [enabled, key] of [[destinations.useGed && Number.isInteger(doc.gedId), 'statusGed'], [destinations.useLocal, 'statusLocal'], [destinations.useDrive, 'statusDrive']]) {
+                if (!enabled) continue;
+                const status = doc[key] || '';
+                if (status.startsWith('↷')) result.existing++;
+                else if (status.startsWith('✓')) result[key === 'statusLocal' ? 'downloads' : 'sent']++;
+                else if (status.startsWith('✗')) result.failed++;
+                else result.pending++;
+            }
+        }
+        if (destinations.useLocal) result.downloads = docs.some(d=>(d.statusLocal||'').startsWith('✓')) ? 1 : 0;
+        return result;
+    }
+
+    function currentBatchSignature() {
+        return JSON.stringify({ student: getStudentMeta(), pages: state.pageModels.map(p => [p.id, p.originalPage, p.docKey, p.rotation]) });
+    }
+
+    function invalidateBatch() {
+        state.generatedDocuments = [];
+        state.batchSignature = '';
+        if (el.resultsPanel) el.resultsPanel.hidden = true;
+        if (el.generated) renderGeneratedSummary();
+        if (el.resultStatus) el.resultStatus.textContent = '';
+    }
+
+    function rememberEdit() {
+        state.undoStack.push(state.pageModels.map(p => ({ ...p })));
+        if (state.undoStack.length > 20) state.undoStack.shift();
+    }
+
+    function redrawPages() {
+        el.pages.replaceChildren();
+        state.pageModels.forEach(appendPageCard);
+        updatePageLabels(); updateSummary(); atualizarBotoes();
+    }
+
+    function pageNeedsReview(p) {
+        return !p.manual && (!p.aiSuggestion || (p.aiSuggestion.engine ? !p.aiSuggestion.autoApply : p.aiSuggestion.confidence < 0.85));
+    }
+
+    function applyPageFilter() {
+        if (!el.pageFilter || !el.pages) return;
+        const filter = el.pageFilter.value;
+        for (const p of state.pageModels) {
+            const card = el.pages.querySelector(`[data-page-id="${CSS.escape(p.id)}"]`);
+            if (!card) continue;
+            card.hidden = filter === 'unclassified' ? p.docKey !== 'ignore' || p.reviewed : filter === 'review' ? !pageNeedsReview(p) : false;
+        }
+    }
+
+    async function bulkEdit(action) {
+        if (state.processing) return;
+        const ids = new Set([...el.pages.querySelectorAll('.page-check:checked')].map(n => n.closest('.page-card').dataset.pageId));
+        const pages = state.pageModels.filter(p => ids.has(p.id));
+        if (!pages.length) return alert('Marque as páginas que deseja alterar.');
+        rememberEdit(); setBusy(true);
+        try {
+            for (const p of pages) {
+                if (action === 'rotate') {
+                    p.rotation = (p.rotation + 90) % 360;
+                    p.thumbnailDataUrl = await renderPageToDataUrl(p.originalPage, p.rotation);
+                } else { p.docKey = action === 'ignore' ? 'ignore' : el.bulkType.value; p.manual = true; p.reviewed = true; }
+            }
+            invalidateBatch(); redrawPages(); scheduleDraft();
+        } catch (error) { showError(error, 'Falha na edição'); }
+        finally { setBusy(false); }
+    }
+
+    function installWorkspaceTools() {
+        const style = document.createElement('style');
+        style.textContent = `#${APP.id}-app .page-card[hidden]{display:none} #${APP.id}-app .work-tools{display:flex;flex-wrap:wrap;gap:8px;padding:12px;background:#fff;border-radius:10px;margin:10px 0} #${APP.id}-app .work-tools select{max-width:280px} #${APP.id}-app .results{padding:14px;background:white;border-radius:10px;margin-top:12px} #${APP.id}-app .results .summary-row{flex-wrap:wrap;gap:8px} .ad-review{font:15px system-ui;color:#21334a;background:#fff;border:0;border-radius:14px;padding:24px;width:min(850px,90vw);max-height:85vh;overflow:auto;box-shadow:0 15px 80px #0005;z-index:2147483647} .ad-review::backdrop{background:#0008} .ad-review button{padding:10px 16px;margin:8px 8px 0 0;cursor:pointer} .ad-review table{width:100%;border-collapse:collapse} .ad-review td,.ad-review th{text-align:left;padding:8px;border-bottom:1px solid #ddd} .ad-review iframe{width:100%;height:50vh;border:1px solid #ccc}`;
+        document.head.appendChild(style);
+        const bar = document.createElement('div'); bar.className = 'work-tools';
+        bar.innerHTML = `<label>Mostrar <select data-tool="filter"><option value="all">Todas as páginas</option><option value="unclassified">Não classificadas</option><option value="review">Revisar sugestões</option></select></label><button data-tool="select">Marcar visíveis</button><button data-tool="unselect">Desmarcar todas</button><select data-tool="type" aria-label="Tipo para as páginas marcadas">${makeDocumentOptions()}</select><button data-tool="classify">Classificar marcadas</button><button data-tool="rotate">Girar marcadas</button><button data-tool="ignore">Ignorar marcadas</button><button data-tool="undo">Desfazer</button><button data-tool="draft">Salvar rascunho agora</button><button data-tool="restore">Recuperar rascunho</button><span data-tool="draft-status" role="status">Rascunho automático neste navegador.</span>`;
+        el.pages.before(bar);
+        el.pageFilter = bar.querySelector('[data-tool="filter"]');
+        el.bulkType = bar.querySelector('[data-tool="type"]');
+        el.draftStatus = bar.querySelector('[data-tool="draft-status"]');
+        el.pageFilter.addEventListener('change', applyPageFilter);
+        bar.querySelector('[data-tool="select"]').onclick = () => el.pages.querySelectorAll('.page-card:not([hidden]) .page-check').forEach(n => n.checked = true);
+        bar.querySelector('[data-tool="unselect"]').onclick = () => el.pages.querySelectorAll('.page-check').forEach(n => n.checked = false);
+        for (const action of ['classify', 'rotate', 'ignore']) bar.querySelector(`[data-tool="${action}"]`).onclick = () => bulkEdit(action);
+        bar.querySelector('[data-tool="undo"]').onclick = () => {
+            if (state.processing || !state.undoStack.length) return;
+            state.pageModels = state.undoStack.pop(); invalidateBatch(); redrawPages(); scheduleDraft();
+        };
+        bar.querySelector('[data-tool="draft"]').onclick = saveDraftNow;
+        bar.querySelector('[data-tool="restore"]').onclick = restoreDraft;
+        const result = document.createElement('section'); result.className = 'results';
+        result.innerHTML = '<h3>Resultado por documento</h3><p class="result-status" role="status"></p><button class="retry">Reenviar somente pendentes</button>';
+        result.append(el.generated, el.log); el.pages.after(result);
+        el.resultStatus = result.querySelector('.result-status');
+        el.retryBtn = result.querySelector('.retry'); el.retryBtn.onclick = () => executeDestinations(true);
+        el.executeBtn.textContent = 'Revisar e salvar';
+        compactUploadInterface(bar, result);
+        for (const control of [el.studentName, el.studentBirth, el.studentCode, el.archiveRoot, el.historical]) control.addEventListener('change', () => {
+            if ([el.studentName,el.studentBirth,el.studentCode].includes(control)) { state.selectedStudentMatch = null; renderStudentLocationStatus(); updateUploadFolderControls(); }
+            invalidateBatch(); scheduleDraft();
+        });
+        window.addEventListener('beforeunload', event => {
+            if (state.processing || state.draftPending) { event.preventDefault(); event.returnValue = ''; }
+        });
+        draftStore('readonly').then(draft => { if (draft) el.draftStatus.textContent = 'Há um rascunho salvo. Use Recuperar rascunho antes de iniciar outro trabalho.'; }).catch(() => el.draftStatus.textContent = 'Armazenamento de rascunho indisponível.');
+    }
+
+    async function importSourceFiles(files) {
+        if (state.processing || !files.length) return;
+        setBusy(true); state.cancelled = false;
+        let nextDocument;
+        try {
+            if (files.some(f => !/\.(pdf|jpe?g|png)$/i.test(f.name))) throw new Error('Selecione somente PDF, JPG ou PNG.');
+            if ((state.sourceBytes?.byteLength || 0) + files.reduce((n,f) => n + f.size, 0) > APP.maxPdfSize) throw new Error('O conjunto de arquivos ultrapassa 120 MB.');
+            const output = state.sourceBytes ? await PDFLib.PDFDocument.load(state.sourceBytes.slice()) : await PDFLib.PDFDocument.create();
+            const previousCount = output.getPageCount();
+            const sourceNames = [];
+            for (const file of files) {
+                if (state.cancelled) throw new Error('Importação cancelada.');
+                updateProgress(5, `Importando ${file.name}...`);
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                if (/\.pdf$/i.test(file.name)) {
+                    const pdf = await PDFLib.PDFDocument.load(bytes);
+                    for (const page of await output.copyPages(pdf, pdf.getPageIndices())) { output.addPage(page); sourceNames.push(file.name); }
+                } else {
+                    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+                    const canvas = document.createElement('canvas');
+                    const ratio = Math.min(1, 2400 / Math.max(bitmap.width, bitmap.height));
+                    canvas.width = Math.max(1, Math.round(bitmap.width * ratio)); canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
+                    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(bitmap,0,0,canvas.width,canvas.height); bitmap.close();
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
+                    if (!blob) throw new Error(`Não foi possível converter ${file.name}.`);
+                    const image = await output.embedJpg(await blob.arrayBuffer());
+                    const size = image.width > image.height ? [841.89,595.28] : [595.28,841.89];
+                    const page = output.addPage(size); const scale = Math.min(size[0]/image.width, size[1]/image.height);
+                    page.drawImage(image,{x:(size[0]-image.width*scale)/2,y:(size[1]-image.height*scale)/2,width:image.width*scale,height:image.height*scale});
+                    sourceNames.push(file.name); canvas.width = canvas.height = 0;
+                }
+            }
+            const bytes = await output.save();
+            if (bytes.byteLength > APP.maxPdfSize) throw new Error('O PDF combinado ultrapassa 120 MB.');
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            nextDocument = await pdfjsLib.getDocument({data:bytes.slice()}).promise;
+            const models = [...state.pageModels];
+            for (let i = previousCount; i < nextDocument.numPages; i++) {
+                if (state.cancelled) throw new Error('Importação cancelada.');
+                const page = await nextDocument.getPage(i+1); const rotation = page.rotate || 0;
+                const viewport = page.getViewport({scale:APP.thumbnailScale,rotation});
+                const canvas = document.createElement('canvas'); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+                await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+                models.push({id:crypto.randomUUID(),originalPage:i+1,docKey:'ignore',rotation,thumbnailDataUrl:canvas.toDataURL('image/jpeg',.82),extractedText:'',aiSuggestion:null,ocrUsed:false,manual:false,reviewed:false,sourceName:sourceNames[i-previousCount]});
+                canvas.width=canvas.height=0;
+                updateProgress(10+40*(i-previousCount+1)/sourceNames.length, `Preparando página ${i+1}...`);
+            }
+            const oldDocument = state.pdfjsDocument;
+            state.pdfjsDocument=nextDocument; nextDocument=null;
+            state.sourceBytes=bytes; state.sourceNames.push(...files.map(f=>f.name));
+            state.sourceFile=new File([bytes], 'Documentos do aluno.pdf',{type:'application/pdf'});
+            state.pageModels=models; state.undoStack=[];
+            if (!el.studentCode.value && files.length===1) el.studentCode.value=inferStudentCode(files[0].name);
+            await oldDocument?.destroy(); invalidateBatch(); redrawPages(); scheduleDraft();
+            updateProgress(50, `${models.length} página(s) pronta(s).`);
+        } catch (error) { showError(error,'Não foi possível importar'); }
+        finally { await nextDocument?.destroy(); setBusy(false); }
+    }
+
+    function draftStore(mode, value) {
+        return new Promise((resolve,reject) => {
+            const request=indexedDB.open('sigeduca-arquivo-digital',1);
+            request.onupgradeneeded=()=>request.result.createObjectStore('drafts');
+            request.onerror=()=>reject(request.error);
+            request.onsuccess=()=>{
+                const db=request.result; const tx=db.transaction('drafts',mode); const store=tx.objectStore('drafts');
+                const action=mode==='readonly'?store.get('current'):value===null?store.delete('current'):store.put(value,'current');
+                tx.oncomplete=()=>{db.close();resolve(action.result);};
+                tx.onerror=tx.onabort=()=>{db.close();reject(tx.error || new Error('Rascunho não salvo.'));};
+            };
+        });
+    }
+
+    function queueDraftWrite(value) {
+        state.draftPending = true;
+        const next = state.draftQueue.catch(()=>{}).then(()=>draftStore('readwrite',value));
+        state.draftQueue = next;
+        next.then(()=>{ if(state.draftQueue===next && !state.draftDirty) state.draftPending=false; },()=>{ if(state.draftQueue===next && !state.draftDirty) state.draftPending=false; });
+        return next;
+    }
+
+    function scheduleDraft() {
+        if (!el.pages || !state.sourceBytes) return;
+        clearTimeout(state.draftTimer); state.draftDirty=true; state.draftPending=true;
+        state.draftTimer=setTimeout(saveDraftNow,600);
+    }
+
+    async function saveDraftNow() {
+        clearTimeout(state.draftTimer);
+        if (!state.sourceBytes) return;
+        state.draftDirty=false;
+        const draft={version:1,savedAt:Date.now(),bytes:state.sourceBytes.slice(),student:getStudentMeta(),match:state.selectedStudentMatch,sourceNames:[...state.sourceNames],pages:state.pageModels.map(({thumbnailDataUrl,...p})=>({...p})),destinations:[el.destGed.checked,el.destLocal.checked,el.destDrive.checked],generated:state.generatedDocuments.map(d=>({...d})),batchSignature:state.batchSignature};
+        try { await queueDraftWrite(draft); el.draftStatus.textContent='Rascunho salvo às '+new Date(draft.savedAt).toLocaleTimeString('pt-BR')+'.'; }
+        catch(error) { el.draftStatus.textContent='Não foi possível salvar o rascunho. Mantenha esta aba aberta.'; addLog(error.message,'warning'); }
+    }
+
+    async function restoreDraft() {
+        if (state.processing) return;
+        if (state.sourceBytes && !confirm('Substituir o trabalho aberto pelo último rascunho salvo?')) return;
+        clearTimeout(state.draftTimer); setBusy(true);
+        let loaded;
+        try {
+            await state.draftQueue.catch(()=>{});
+            const draft=await draftStore('readonly');
+            if (!draft || draft.version!==1) return alert('Nenhum rascunho compatível encontrado.');
+            pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            loaded=await pdfjsLib.getDocument({data:draft.bytes.slice()}).promise;
+            const models=[];
+            for (const p of draft.pages) {
+                if (!DOCUMENT_TYPES[p.docKey] || p.originalPage<1 || p.originalPage>loaded.numPages) throw new Error('Rascunho inválido.');
+                const page=await loaded.getPage(p.originalPage); const viewport=page.getViewport({scale:APP.thumbnailScale,rotation:p.rotation});
+                const canvas=document.createElement('canvas'); canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+                await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+                models.push({...p,thumbnailDataUrl:canvas.toDataURL('image/jpeg',.82)});canvas.width=canvas.height=0;
+            }
+            const old=state.pdfjsDocument; state.pdfjsDocument=loaded; loaded=null; await old?.destroy();
+            state.sourceBytes=draft.bytes;state.sourceFile=new File([draft.bytes],'Rascunho.pdf',{type:'application/pdf'});
+            state.sourceNames=draft.sourceNames || [];state.pageModels=models;state.selectedStudentMatch=draft.match;state.undoStack=[];
+            const student=draft.student;
+            el.studentName.value=student.name;el.studentCode.value=student.code;el.studentBirth.value=student.birth;el.archiveRoot.value=student.root;el.historical.checked=student.historical;
+            [el.destGed.checked,el.destLocal.checked,el.destDrive.checked]=draft.destinations;
+            updateStudentCodeVisibility();
+            invalidateBatch();
+            if(draft.batchSignature===currentBatchSignature()){state.generatedDocuments=draft.generated||[];state.batchSignature=draft.batchSignature;}
+            redrawPages();renderGeneratedSummary();renderStudentLocationStatus();updateUploadFolderControls();
+            el.draftStatus.textContent='Rascunho recuperado. Confira os destinos antes de enviar novamente.';
+            updateProgress(50,`${models.length} página(s) recuperada(s).`);
+        } catch(error){showError(error,'Não foi possível recuperar');}
+        finally{await loaded?.destroy();state.draftPending=false;setBusy(false);}
+    }
+
+    function askInDialog(title, content, acceptLabel) {
+        return new Promise(resolve=>{
+            const dialog=document.createElement('dialog');dialog.className='ad-review';
+            dialog.innerHTML=`<h2>${escapeHtml(title)}</h2>${content}<div><button data-choice="yes">${escapeHtml(acceptLabel)}</button><button data-choice="no">Voltar sem enviar</button></div>`;
+            document.body.appendChild(dialog);
+            let finished=false;
+            const finish=value=>{if(finished)return;finished=true;dialog.close();dialog.remove();resolve(value);};
+            dialog.querySelector('[data-choice="yes"]').onclick=()=>finish(true);
+            dialog.querySelector('[data-choice="no"]').onclick=()=>finish(false);
+            dialog.addEventListener('cancel',event=>{event.preventDefault();finish(false);});
+            dialog.showModal();dialog.querySelector('[data-choice="no"]').focus();
+        });
+    }
+
+    async function reviewBeforeSave({useGed,useLocal,useDrive,student}) {
+        const rows=state.generatedDocuments.map(d=>`<tr><td>${escapeHtml(d.shortName)}</td><td>${d.pages.length}</td><td>${humanSize(d.file.size)}</td><td>${[useGed&&Number.isInteger(d.gedId)?(isDestinationDone(d.statusGed)?escapeHtml(d.statusGed):'GED'):'',useLocal?(isDestinationDone(d.statusLocal)?'Download já solicitado':'Computador'):'',useDrive?(isDestinationDone(d.statusDrive)?'Drive já enviado':'Drive'):''].filter(Boolean).join(' · ') || 'Sem destino compatível'}</td></tr>`).join('');
+        const ignored=state.pageModels.filter(p=>p.docKey==='ignore').length;
+        const unreviewed=state.pageModels.filter(p=>p.docKey!=='ignore'&&pageNeedsReview(p)).length;
+        return askInDialog('Conferir antes de salvar',`<p><b>Aluno:</b> ${escapeHtml(student.name || 'Sem nome')} · <b>Código:</b> ${escapeHtml(student.code || 'Não informado')} · <b>Nascimento:</b> ${escapeHtml(student.birth || 'Não informado')}</p><p><b>Arquivo:</b> ${escapeHtml(student.root)} · ${escapeHtml(student.sheet || 'Sem localização física')} ${escapeHtml(String(student.row || ''))}</p><p><b>Pasta digital:</b> ${escapeHtml(student.existingFolderUrl || 'Será localizada ou criada pelo serviço configurado, se Drive estiver marcado.')}</p><p><b>${ignored} página(s) ignorada(s)</b>; ${unreviewed} página(s) selecionada(s) com sugestão a revisar.</p><table><thead><tr><th>Documento</th><th>Páginas</th><th>Tamanho</th><th>Destino / situação</th></tr></thead><tbody>${rows}</tbody></table><p>O computador receberá um PDF único com as páginas selecionadas na ordem atual. O navegador solicitará o download.</p>`,'Confirmar e salvar');
+    }
+
+    async function offerCompression(doc) {
+        if (!await askInDialog('Documento acima de 5 MB',`<p>${escapeHtml(doc.shortName)}: ${humanSize(doc.file.size)}. Preparar uma cópia reduzida para GED e Drive? A redução transforma as páginas em imagens; confira a legibilidade na prévia. O PDF único do computador mantém as páginas originais.</p>`,'Preparar redução')) return false;
+        let reduced;
+        for (const [scale,quality] of [[1.6,.78],[1.25,.65],[1,.52]]) {
+            if(state.cancelled)return false;
+            const pdf=await PDFLib.PDFDocument.create();
+            for(const pageNumber of doc.pages){
+                if(state.cancelled)return false;
+                const model=state.pageModels.find(p=>p.originalPage===pageNumber);
+                const page=await state.pdfjsDocument.getPage(pageNumber);
+                const viewport=page.getViewport({scale,rotation:model.rotation});
+                const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+                const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+                await page.render({canvasContext:ctx,viewport}).promise;
+                const image=await pdf.embedJpg(canvas.toDataURL('image/jpeg',quality));
+                const target=pdf.addPage([viewport.width/scale,viewport.height/scale]);
+                target.drawImage(image,{x:0,y:0,width:target.getWidth(),height:target.getHeight()});canvas.width=canvas.height=0;
+            }
+            reduced=new File([await pdf.save()],doc.file.name,{type:'application/pdf'});
+            if(reduced.size<=APP.maxGeneratedFileSize)break;
+        }
+        if(reduced.size>APP.maxGeneratedFileSize){alert('A cópia ainda ultrapassa 5 MB. Separe ou digitalize novamente com resolução menor. Nenhum envio iniciado.');return false;}
+        const url=URL.createObjectURL(reduced);
+        try{
+            const accepted=await askInDialog('Conferir legibilidade da cópia reduzida',`<p>${escapeHtml(doc.shortName)}: ${humanSize(doc.file.size)} → ${humanSize(reduced.size)}. Confira todas as páginas antes de aceitar.</p><iframe title="PDF reduzido para conferência" src="${url}"></iframe><p><a href="${url}" target="_blank" rel="noopener">Abrir prévia em outra aba</a></p>`,'Usar esta cópia reduzida');
+            if(accepted)doc.file=reduced;
+            return accepted;
+        }finally{URL.revokeObjectURL(url);}
+    }
+
+
+    const SEARCH_CACHE_TTL = 15 * 60 * 1000;
+    const searchInFlight = new Map();
+
+    async function searchCacheKey() {
+        const scope = `${GM_getValue(APP.driveEndpointKey, '')}\n${GM_getValue(APP.driveTokenKey, '')}`;
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(scope));
+        return 'adig:search:v1:' + [...new Uint8Array(digest)].map(n=>n.toString(16).padStart(2,'0')).join('');
+    }
+
+    async function clearSearchCache() {
+        const key=await searchCacheKey();
+        GM_setValue(key, []); GM_setValue(key+':index:PERMANENTE',null); GM_setValue(key+':index:FORMANDOS',null);
+    }
+
+    async function cachedStudentSearch(payload, forceRefresh = false) {
+        if(state.backendReady)await state.backendReady;
+        const storeKey = await searchCacheKey();
+        let index=GM_getValue(storeKey+':index:'+payload.root,null);
+        if(state.indexSupported&&(forceRefresh||!index||index.expiresAt<=Date.now())){
+            index=await downloadStudentIndex(payload.root,forceRefresh);
+            forceRefresh=false;
+        }
+        if (!forceRefresh && index && index.expiresAt>Date.now() && Array.isArray(index.records)) {
+            const query=normalizeText(payload.query);
+            const terms=query.split(/\s+/).filter(t=>t.length>=3&&!/^(DAS|DOS|DEL|DELLA)$/.test(t));
+            const single=query.split(/\s+/).length===1;
+            const results=index.records.filter(r=>single?normalizeText(r.name).includes(query):terms.some(t=>normalizeText(r.name).includes(t)));
+            if(el.cacheStatus)el.cacheStatus.textContent='Índice local · '+new Date(index.createdAt).toLocaleTimeString('pt-BR');
+            return {responseText:JSON.stringify({ok:true,results}),fromCache:true};
+        }
+        const queryKey = JSON.stringify([payload.root, normalizeText(payload.query), payload.birth || '', payload.maxResults]);
+        const now = Date.now();
+        const stored = GM_getValue(storeKey, []);
+        const entries = (Array.isArray(stored) ? stored : []).filter(e => e && now-e.time >= 0 && now-e.time < SEARCH_CACHE_TTL);
+        const cached = entries.find(e => e.key === queryKey);
+        if (!forceRefresh && cached) {
+            if (el.cacheStatus) el.cacheStatus.textContent = `Cache local · ${new Date(cached.time).toLocaleTimeString('pt-BR')}`;
+            return { responseText: JSON.stringify(cached.data), fromCache: true };
+        }
+        const pendingKey = storeKey + queryKey;
+        if (searchInFlight.has(pendingKey)) return searchInFlight.get(pendingKey);
+        const request = (async () => {
+            const started = performance.now();
+            const response = await drivePostJson({...payload,forceRefresh});
+            const data = parseDriveResponse(response);
+            if (data.ok && Array.isArray(data.results)) {
+                const latest = GM_getValue(storeKey, []);
+                const next = (Array.isArray(latest) ? latest : []).filter(e => e && e.key !== queryKey && Date.now()-e.time < SEARCH_CACHE_TTL);
+                next.push({ key:queryKey, time:Date.now(), data });
+                try { GM_setValue(storeKey,next.slice(-60)); } catch(error) { console.warn('Cache de consultas não salvo:',error); }
+            }
+            if(el.cacheStatus)el.cacheStatus.textContent=`Google Sheets · ${((performance.now()-started)/1000).toFixed(1)} s`;
+            return response;
+        })();
+        searchInFlight.set(pendingKey,request);
+        try{return await request;}finally{searchInFlight.delete(pendingKey);}
+    }
+
+    function installSearchCacheControls() {
+        installBirthMask();
+        state.backendReady=prepareSearchBackend();
+        el.archiveRoot.addEventListener('change',()=>{
+            state.selectedStudentMatch=null;state.lastSearchResults=[];state.searchSequence=(state.searchSequence||0)+1;
+            if(el.studentCode)el.studentCode.value='';
+            if(el.matchModal)el.matchModal.style.display='none';
+            if(el.cacheStatus)el.cacheStatus.textContent='Consultando '+el.archiveRoot.value+'.';
+        });
+        const container = el.searchStudentBtn.parentElement;
+        const refresh = document.createElement('button'); refresh.type='button';refresh.textContent='Atualizar busca';refresh.title='Consultar novamente o Google Sheets, sem usar o resultado salvo';
+        refresh.onclick=()=>{if(!state.processing&&!el.searchStudentBtn.disabled)searchStudentInLists(true);};
+        const clear=document.createElement('button');clear.type='button';clear.textContent='Limpar cache';clear.title='Apagar as consultas guardadas neste navegador';
+        clear.onclick=()=>clearSearchCache().then(()=>el.cacheStatus.textContent='Cache removido.').catch(error=>showError(error));
+        el.cacheStatus=document.createElement('small');el.cacheStatus.setAttribute('role','status');el.cacheStatus.style.display='block';el.cacheStatus.textContent='Consultas guardadas por 15 minutos.';
+        const options=document.createElement('details');options.className='search-options';options.innerHTML='<summary>Opções de busca</summary>';
+        const sync=document.createElement('button');sync.type='button';sync.textContent='Sincronizar nomes';sync.onclick=()=>syncStudentIndex(sync);
+        options.append(refresh,sync,clear,el.cacheStatus);container.append(options);
+    }
+
+    async function refreshSelectedStudent() {
+        const selected = state.selectedStudentMatch;
+        const response = await drivePostJson({action:'searchStudents',clientVersion:APP.version,root:selected.root,query:selected.name,birth:selected.birth || '',maxResults:100});
+        const data=parseDriveResponse(response);
+        if(!data.ok)throw new Error(data.error || 'Não foi possível conferir a localização atual do aluno.');
+        const matches=(data.results || []).filter(r=>normalizeText(r.name)===normalizeText(selected.name)&&(!selected.birth || parseDateFlexible(r.birth)===parseDateFlexible(selected.birth))&&(!r.root || r.root===selected.root));
+        if(matches.length!==1)throw new Error('A localização do aluno mudou ou há homônimos. Pesquise e selecione o aluno novamente antes de enviar ao Drive.');
+        const fresh=matches[0];
+        if(!Number.isInteger(Number(fresh.row))||Number(fresh.row)<1)throw new Error('A planilha retornou uma localização inválida.');
+        state.selectedStudentMatch={...selected,...fresh,root:selected.root,birth:parseDateFlexible(fresh.birth || '')};
+        renderStudentLocationStatus();updateUploadFolderControls();scheduleDraft();
+    }
+
+    function compactUploadInterface(bar,result) {
+        el.resultsPanel=result;result.hidden=!state.generatedDocuments.length;
+        const app=el.app;
+        app.querySelector('.ad-title').textContent='Arquivo Digital';
+        app.querySelector('.ad-subtitle').textContent=`Organização e envio de documentos · v${APP.version}`;
+        el.scannerBtn.hidden=true;
+        const left=app.querySelector('.ad-left');
+        const sections=[...left.querySelectorAll(':scope > .section')];
+        const help=document.createElement('details');help.className='section';
+        help.innerHTML='<summary style="padding:12px;cursor:pointer">Ajuda e conexão</summary><div class="help-content"></div>';
+        const content=help.querySelector('.help-content');
+        for(const section of sections){
+            const title=section.querySelector('.section-title')?.textContent || '';
+            if(title==='Google Drive' || title.includes('OCR'))content.append(section);
+            if(title==='Destinos'){
+                section.querySelector('.tiny')?.remove();
+                section.classList.add('destination-box');
+                app.querySelector('.ad-footer').before(section);
+            }
+        }
+        left.append(help);
+        const hint=el.dropzone.querySelector(':scope > .tiny');if(hint)hint.textContent='PDF, JPG ou PNG · até 120 MB';
+        el.autoDetectBtn.textContent='Identificar documentos';
+        el.autoDetectBtn.title='Executa OCR e IA local em um clique; preserva escolhas manuais.';
+        el.acceptAiBtn.hidden=true;
+        const aiHelp=document.createElement('p');aiHelp.className='tiny';aiHelp.textContent='Identificar documentos combina OCR e IA local gratuita. No primeiro uso, baixa cerca de 118 MB do modelo, além dos arquivos de execução. Os documentos não são enviados ao provedor da IA. Casos duvidosos ficam para revisão.';content.prepend(aiHelp);
+        const draft=document.createElement('details');draft.innerHTML='<summary>Rascunho</summary>';draft.style.marginLeft='auto';
+        for(const name of ['draft','restore','draft-status'])draft.append(bar.querySelector(`[data-tool="${name}"]`));
+        bar.append(draft);
+        const logs=document.createElement('details');logs.innerHTML='<summary>Detalhes do processamento</summary>';logs.append(el.log);result.append(logs);
+        const style=document.createElement('style');
+        style.textContent=`#${APP.id}-app .ad-main{grid-template-columns:275px minmax(0,1fr)} #${APP.id}-app .ad-right{display:none} #${APP.id}-app .destination-box{margin:0;border-radius:0;border-top:1px solid #dbe1e9;display:flex;align-items:center;gap:20px;padding:8px 18px} #${APP.id}-app .destination-box .section-title{padding:0;border:0;background:none} #${APP.id}-app .destination-box .section-body{padding:0;display:flex;gap:20px;flex-wrap:wrap} #${APP.id}-app details summary{cursor:pointer} #${APP.id}-app .work-tools{font-size:12px} #${APP.id}-app .work-tools button{padding:7px 9px} #${APP.id}-app .work-tools details button{display:block;margin:8px 0} #${APP.id}-app .results[hidden]{display:none} #${APP.id}-app .help-content .section{box-shadow:none} @media(max-width:1000px){#${APP.id}-app .ad-main{grid-template-columns:1fr} #${APP.id}-app .destination-box{flex-wrap:wrap}}`;
+        document.head.append(style);
+        const layout=document.createElement('style');
+        layout.textContent=`#${APP.id}-app .ad-shell{grid-template-rows:auto auto minmax(0,1fr) auto auto} #${APP.id}-app .ad-identity.without-ged{grid-template-columns:140px 160px minmax(200px,1fr) 140px auto} #${APP.id}-app .ad-identity > [hidden]{display:none} @media(max-width:1000px){#${APP.id}-app .ad-identity,#${APP.id}-app .ad-identity.without-ged{grid-template-columns:repeat(2,minmax(0,1fr));padding-left:18px}}`;
+        document.head.append(layout);
+        installSearchCacheControls();
+        const codeField=el.studentCode.parentElement;
+        codeField.querySelector('label').textContent='Código do aluno (GED)';
+        el.studentCode.placeholder='Para envio ao GED';
+        el.studentCode.title='Usado para abrir o cadastro e anexar documentos no SIGEDUCA.';
+        el.destGed.addEventListener('change',updateStudentCodeVisibility);
+        updateStudentCodeVisibility();
+    }
+
+    function updateStudentCodeVisibility() {
+        if(!el.studentCode||!el.destGed)return;
+        el.studentCode.parentElement.hidden=!el.destGed.checked;
+        el.app.querySelector('.ad-identity').classList.toggle('without-ged',!el.destGed.checked);
+    }
+
+
+    async function fileSha256(file) {
+        const bytes=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
+        return [...new Uint8Array(bytes)].map(n=>n.toString(16).padStart(2,'0')).join('');
+    }
+
+    function formatBirthDigits(value) {
+        const digits=String(value||'').replace(/\D/g,'').slice(0,8);
+        return digits.slice(0,2)+(digits.length>2?'/'+digits.slice(2,4):'')+(digits.length>4?'/'+digits.slice(4):'');
+    }
+    function isValidBirth(value) {
+        if(!value)return true;
+        const match=String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(!match)return false;
+        const day=Number(match[1]),month=Number(match[2]),year=Number(match[3]);
+        if(year<1000)return false;
+        const date=new Date(year,month-1,day);
+        return date.getFullYear()===year&&date.getMonth()===month-1&&date.getDate()===day&&date<=new Date();
+    }
+    function validateBirthInput() {
+        if(!el.studentBirth)return true;
+        const valid=isValidBirth(el.studentBirth.value.trim());
+        el.studentBirth.setCustomValidity(valid?'':'Informe uma data válida no formato dd/mm/aaaa.');
+        if(!valid)el.studentBirth.reportValidity();return valid;
+    }
+    function installBirthMask() {
+        const input=el.studentBirth;if(!input)return;
+        input.inputMode='numeric';input.maxLength=10;input.placeholder='dd/mm/aaaa';
+        input.addEventListener('input',()=>{
+            const before=input.value,position=input.selectionStart||0,digitsBefore=before.slice(0,position).replace(/\D/g,'').length;
+            input.value=formatBirthDigits(before);let next=0,count=0;
+            while(next<input.value.length&&count<digitsBefore){if(/\d/.test(input.value[next]))count++;next++;}
+            input.setSelectionRange(next,next);input.setCustomValidity('');
+        });
+        input.addEventListener('blur',()=>{input.setCustomValidity(isValidBirth(input.value)?'':'Informe uma data válida no formato dd/mm/aaaa.');});
+    }
+    function refreshSearchControls() {
+        const busy=Boolean(state.processing||state.searchBusy||state.syncingIndex);
+        for(const input of [el.archiveRoot,el.studentName,el.studentBirth,el.studentCode,el.searchStudentBtn])if(input)input.disabled=busy;
+    }
+
+    async function prepareSearchBackend() {
+        state.indexSupported=false;
+        if(!GM_getValue(APP.driveEndpointKey,'')||!GM_getValue(APP.driveTokenKey,''))return;
+        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));}
+        catch(error){console.warn('Não foi possível verificar o serviço:',error.message);}
+    }
+
+    async function downloadStudentIndex(root,forceRefresh=false) {
+        const storeKey=await searchCacheKey();let offset=0,version='',records=[],snapshot;
+        do{
+            const progress='Sincronizando '+root+' · '+records.length+' nomes...';
+            if(el.cacheStatus)el.cacheStatus.textContent=progress;
+            const boot=document.querySelector('[data-boot="index"]');if(boot)boot.textContent='◌ '+progress;
+            const data=parseDriveResponse(await drivePostJson({action:'getStudentIndex',root,offset,version,createdAt:snapshot?.createdAt,forceRefresh}));
+            if(!data.ok)throw new Error(data.error||'Falha ao sincronizar.');
+            if(!Array.isArray(data.results)||!data.version||(version&&version!==data.version))throw new Error('Índice mudou durante a sincronização. Tente novamente.');
+            if(data.nextOffset!==null&&(!Number.isInteger(data.nextOffset)||data.nextOffset<=offset))throw new Error('Página de índice inválida.');
+            records.push(...data.results);version=data.version;offset=data.nextOffset;snapshot=data;
+        }while(offset!==null);
+        if((snapshot.total!==null&&snapshot.total!==records.length)||snapshot.expiresAt<=Date.now())throw new Error('Índice incompleto ou expirado. Tente novamente.');
+        const index={records,version,createdAt:snapshot.createdAt,expiresAt:snapshot.expiresAt};
+        GM_setValue(storeKey+':index:'+root,index);return index;
+    }
+
+    async function syncStudentIndex(button) {
+        if(state.processing||state.searchBusy||state.syncingIndex)return;
+        state.syncingIndex=true;button.disabled=true;refreshSearchControls();
+        const root=el.archiveRoot.value;
+        try{
+            const ping=parseDriveResponse(await drivePostJson({action:'ping'}));
+            state.indexSupported=ping.capabilities?.includes('studentIndex') || false;
+            if(!ping.ok||!state.indexSupported)throw new Error('Atualize o serviço Google Apps Script para a versão 1.2.0 antes de sincronizar. A busca online continua disponível.');
+            const index=await downloadStudentIndex(root);
+            el.cacheStatus.textContent=index.records.length+' nomes disponíveis localmente em '+root+'.';
+        }catch(error){el.cacheStatus.textContent=error.message;addLog(error.message,'warning');}
+        finally{state.syncingIndex=false;button.disabled=false;refreshSearchControls();}
+    }
+
+
+    function localAiWorkerProgram() {
+        let extractor, referenceVectors, referenceKeys;
+        self.onmessage = async ({data}) => {
+            try {
+                if (!extractor) {
+                    const {pipeline,env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
+                    env.allowLocalModels = false;
+                    env.useBrowserCache = true;
+                    env.backends.onnx.wasm.numThreads = 1;
+                    extractor = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{
+                        dtype:'q8',device:'wasm',revision:'2c4055b12046f11709e9df2c122e59ffbdc2f900',
+                        progress_callback: p => self.postMessage({id:data.id,progress:p.status==='progress' ? `Baixando IA local: ${Math.round(p.progress || 0)}%` : 'Preparando IA local...'})
+                    });
+                }
+                if (!referenceVectors) {
+                    referenceKeys=data.references.map(r=>r.key);
+                    referenceVectors=(await extractor(data.references.map(r=>r.text),{pooling:'mean',normalize:true})).tolist();
+                }
+                const text=String(data.text || '').replace(/\s+/g,' ').trim();
+                const chunks=[text.slice(0,900)];
+                if(text.length>900)chunks.push(text.slice(900,1800));
+                if(text.length>1800)chunks.push(text.slice(-900));
+                const vectors=(await extractor(chunks,{pooling:'mean',normalize:true})).tolist();
+                const ranked=referenceKeys.map((key,i)=>({key,score:Math.max(...vectors.map(v=>v.reduce((sum,n,j)=>sum+n*referenceVectors[i][j],0)))})).sort((a,b)=>b.score-a.score);
+                self.postMessage({id:data.id,result:{key:ranked[0].key,score:ranked[0].score,margin:ranked[0].score-(ranked[1]?.score || 0),alternatives:ranked.slice(0,3)}});
+            } catch(error) { self.postMessage({id:data.id,error:error.message || String(error)}); }
+        };
+    }
+
+    function aiDocumentReferences() {
+        const descriptions={
+            ged_responsavel:'Documento de identidade RG ou CPF pertencente ao pai, mãe ou responsável legal do estudante.',
+            ged_certidao:'Certidão de nascimento ou casamento. Registro civil, matrícula da certidão, cartório, filiação, data e local de nascimento.',
+            ged_rgcpf:'Carteira de identidade, registro geral RG, CPF ou carteira de identidade nacional do próprio estudante.',
+            ged_energia:'Conta de energia elétrica, fatura de luz, unidade consumidora, consumo em kWh, vencimento e endereço.',
+            ged_sangue:'Resultado de exame de tipagem sanguínea. Grupo ABO A B AB O e fator Rh positivo ou negativo.',
+            ged_vacina:'Caderneta de vacinação, carteira de vacinas, doses aplicadas, datas, lote e imunização.',
+            ged_oftalmo:'Exame oftalmológico, avaliação de optometria, acuidade visual, visão, olhos e receita de óculos.',
+            ged_historico:'Histórico escolar ou atestado de transferência. Estabelecimento de ensino, séries cursadas, disciplinas, notas, carga horária, aprovação e vida escolar.',
+            arquivo_ficha_individual:'Ficha individual do estudante. Ano letivo, turma, frequência, notas por bimestre, componentes curriculares e resultado final.',
+            arquivo_ficha_matricula:'Ficha de matrícula escolar. Dados cadastrais do aluno, responsáveis, endereço, nascimento, telefone, série e turma.',
+            arquivo_atestado_medico:'Atestado médico. Paciente necessita afastamento ou repouso por motivo de saúde, dias, data, assinatura e CRM do médico.',
+            arquivo_certificado:'Certificado ou diploma de conclusão de curso ou ensino, nome do concluinte, instituição, certificação e conclusão.',
+            arquivo_cartao_sus:'Cartão nacional de saúde SUS. Número CNS, nome do cidadão, data de nascimento e Ministério da Saúde.',
+            arquivo_termo_compromisso:'Termo de compromisso ou autorização, ciência e responsabilidade, assinatura do responsável e consentimento.'
+        };
+        return Object.entries(DOCUMENT_TYPES).filter(([key])=>!['ignore','arquivo_diversos'].includes(key)).map(([key,meta])=>({key,text:descriptions[key] || `${meta.label}. ${(meta.keywords || []).join(', ')}.`}));
+    }
+
+    function stopLocalAi(reason='Identificação cancelada.') {
+        state.aiWorker?.terminate();state.aiWorker=null;
+        if(state.aiWorkerUrl)URL.revokeObjectURL(state.aiWorkerUrl);
+        state.aiWorkerUrl=null;
+        state.aiRequest?.reject(new Error(reason));state.aiRequest=null;
+    }
+
+    function classifyWithLocalAi(text) {
+        if (!state.aiWorker) {
+            state.aiWorkerUrl=URL.createObjectURL(new Blob([`(${localAiWorkerProgram.toString()})()`],{type:'text/javascript'}));
+            state.aiWorker=new Worker(state.aiWorkerUrl,{type:'module'});
+            state.aiWorker.onmessage=({data})=>{
+                const pending=state.aiRequest;if(!pending || data.id!==pending.id)return;
+                if(data.progress){setOcrStatus(data.progress,'loading');updateProgress(55,data.progress);return;}
+                state.aiRequest=null;
+                if(data.error)pending.reject(new Error(data.error));else pending.resolve(data.result);
+            };
+            state.aiWorker.onerror=event=>stopLocalAi(event.message || 'Não foi possível carregar a IA local.');
+        }
+        return new Promise((resolve,reject)=>{
+            const id=crypto.randomUUID();
+            const timeout=setTimeout(()=>stopLocalAi('Tempo excedido ao carregar/processar a IA local. Tente novamente.'),240000);
+            state.aiRequest={id,resolve:value=>{clearTimeout(timeout);resolve(value);},reject:error=>{clearTimeout(timeout);reject(error);}};
+            state.aiWorker.postMessage({id,text,references:aiDocumentReferences()});
+        });
+    }
+
+    function combineDocumentEvidence(rule,semantic,text) {
+        const enoughText=normalizeLoose(text).replace(/[^a-z]/g,'').length>=40;
+        if(!semantic)return {...rule,confidence:Math.min(rule.confidence,.70),autoApply:false,engine:'rules-only',reason:'IA indisponível — revisar'};
+        const same=rule.key===semantic.key;
+        const ambiguousPersonal=['ged_responsavel','ged_rgcpf'].includes(semantic.key);
+        const autoApply=enoughText&&same&&rule.confidence>=.85&&semantic.score>=.35&&semantic.margin>=.045&&!ambiguousPersonal;
+        const key=rule.confidence>=.85&&!same?rule.key:semantic.key;
+        return {key,confidence:autoApply?.90:.65,autoApply,engine:'local-ai',semanticScore:semantic.score,margin:semantic.margin,alternatives:semantic.alternatives,hits:rule.hits,reason:!enoughText?'Pouco texto — revisar':!same?'IA e palavras-chave divergem — revisar':autoApply?'OCR/texto e IA concordam':'Sugestão da IA — revisar'};
+    }
+
+    async function identifyDocumentsOneClick() {
+        if(!state.pdfjsDocument||state.processing)return;
+        rememberEdit();setBusy(true);state.cancelled=false;
+        let autoApplied=0,review=0,failed=0,aiAvailable=true;
+        try{
+            for(let i=0;i<state.pageModels.length;i++){
+                if(state.cancelled)break;
+                const model=state.pageModels[i];
+                if(model.manual)continue;
+                try{
+                    updateProgress(10+75*i/state.pageModels.length,`Lendo página ${i+1}/${state.pageModels.length}...`);
+                    const text=await readPageTextWithOcr(model);if(state.cancelled)break;
+                    model.extractedText=text;
+                    const rule=classifyText(text);let semantic=null;
+                    if(aiAvailable&&text.trim().length>=20){
+                        setOcrStatus(`IA local: analisando página ${i+1}...`,'loading');
+                        try{semantic=await classifyWithLocalAi(text);}catch(error){
+                            if(state.cancelled)break;
+                            aiAvailable=false;stopLocalAi();addLog(`IA local indisponível: ${error.message}. Resultados por palavras-chave exigem revisão.`,'warning');
+                        }
+                    }
+                    model.aiSuggestion=combineDocumentEvidence(rule,semantic,text);
+                    if(model.aiSuggestion.autoApply){model.docKey=model.aiSuggestion.key;autoApplied++;}else review++;
+                    renderAiSuggestion(model);
+                }catch(error){failed++;model.aiSuggestion={key:'arquivo_diversos',confidence:0,autoApply:false,engine:'rules-only',reason:'Leitura falhou — revisar'};addLog(`Página ${i+1}: ${error.message}`,'error');renderAiSuggestion(model);}
+                scheduleDraft();await sleep(0);
+            }
+            invalidateBatch();redrawPages();
+            const message=`${autoApplied} página(s) classificada(s), ${review} para revisar, ${failed} falha(s).`;
+            updateProgress(state.cancelled?50:70,state.cancelled?'Identificação cancelada. Alterações já concluídas foram mantidas.':message);
+            setOcrStatus(aiAvailable?'OCR e IA local prontos.':'IA indisponível; confira as sugestões por palavras-chave.',aiAvailable?'ok':'error');
+            addLog(message,failed||review?'warning':'success');
+        }finally{setBusy(false);scheduleDraft();}
+    }
+
+
+    async function preloadArchiveSystem() {
+        if(!el.autoDetectBtn || !el.app?.isConnected)return;
+        const generation=state.bootGeneration=(state.bootGeneration||0)+1;
+        document.getElementById(`${APP.id}-loading`)?.remove();
+        const overlay=document.createElement('div');overlay.id=`${APP.id}-loading`;
+        overlay.style.cssText='position:fixed;inset:0;z-index:2147483500;background:#f3f6fa;display:grid;place-items:center;font:14px Arial;color:#23334b';
+        overlay.innerHTML='<section style="width:min(480px,90vw);background:white;border:1px solid #dce3ed;border-radius:18px;padding:32px;box-shadow:0 12px 45px #21334b12"><h1 style="font-size:23px;margin:0 0 8px">Carregando o sistema</h1><p style="color:#66758b">Preparando o Arquivo Digital neste computador.</p><ul style="list-style:none;padding:0;line-height:2.2"><li data-boot="pdf">◌ Leitor de PDF</li><li data-boot="ocr">◌ OCR em português</li><li data-boot="ai">◌ IA local</li></ul><p class="boot-message" role="status" style="font-size:12px;color:#66758b">O primeiro uso baixa o modelo de IA. Os próximos acessos reutilizam o cache disponível.</p><button class="boot-retry" hidden style="padding:10px">Tentar novamente</button><button class="boot-manual" style="padding:10px;margin-top:12px">Continuar com classificação manual</button></section>';
+        document.body.append(overlay);overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');el.app.inert=true;setBusy(true);state.cancelled=false;
+        const manual=()=>{if(generation!==state.bootGeneration)return;state.bootGeneration++;stopLocalAi();overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('Pré-carregamento interrompido. Clique em Identificar documentos para tentar novamente.','error');};
+        overlay.querySelector('.boot-manual').onclick=manual;
+        overlay.querySelector('.boot-retry').onclick=()=>{if(generation===state.bootGeneration)preloadArchiveSystem();};
+        const stage=async(key,label,work)=>{
+            try{await work();if(generation===state.bootGeneration)overlay.querySelector(`[data-boot="${key}"]`).textContent='✓ '+label;return true;}
+            catch(error){if(generation===state.bootGeneration){overlay.querySelector(`[data-boot="${key}"]`).textContent='✗ '+label;overlay.querySelector('.boot-message').textContent=error.message;}return false;}
+        };
+        const progressTimer=setInterval(()=>{
+            if(generation!==state.bootGeneration){clearInterval(progressTimer);return;}
+            if(state.ocrStatus?.includes('Baixando IA')||state.ocrStatus?.includes('Preparando IA'))overlay.querySelector('[data-boot="ai"]').textContent='◌ '+state.ocrStatus;
+        },400);
+        const tasks=[
+            stage('pdf','Leitor de PDF pronto',async()=>{
+                if(!window.PDFLib||!window.pdfjsLib)throw new Error('As bibliotecas de PDF não carregaram. Atualize a página.');
+                pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                const pdf=await PDFLib.PDFDocument.create();pdf.addPage([10,10]);
+                const loaded=await pdfjsLib.getDocument({data:await pdf.save()}).promise;await loaded.destroy();
+            }),
+            stage('ocr','OCR em português pronto',getOcrWorker),
+            stage('ai','IA local pronta',()=>classifyWithLocalAi('Preparação da identificação de documentos escolares.'))
+        ];
+        if(GM_getValue(APP.driveEndpointKey,'')&&GM_getValue(APP.driveTokenKey,'')){
+            const row=document.createElement('li');row.dataset.boot='index';row.textContent='◌ Índice de alunos';overlay.querySelector('ul').append(row);
+            tasks.push(stage('index','Busca de alunos pronta',async()=>{
+                const ping=parseDriveResponse(await drivePostJson({action:'ping'}));
+                if(!ping.ok)throw new Error(ping.error || 'Serviço indisponível.');
+                state.indexSupported=ping.capabilities?.includes('studentIndex') || false;
+                if(state.indexSupported){
+                    const key=await searchCacheKey(),index=GM_getValue(key+':index:'+el.archiveRoot.value,null);
+                    if(!index||index.expiresAt<=Date.now())await downloadStudentIndex(el.archiveRoot.value);
+                }
+            }));
+        }
+        const results=await Promise.all(tasks);
+        clearInterval(progressTimer);
+        if(generation!==state.bootGeneration)return;
+        if(results.every(Boolean)){overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('PDF, OCR e IA local prontos.','ok');updateProgress(0,'Sistema pronto');}
+        else{overlay.querySelector('.boot-retry').hidden=false;overlay.querySelector('.boot-message').textContent='Um componente não carregou. Verifique a conexão e tente novamente, ou continue com a classificação manual.';}
     }
 
     function init() {
@@ -3142,6 +3873,7 @@
         } else if (ehModoUpload()) {
             document.title = 'Arquivo Digital — Upload';
             buildUploadInterface();
+            queueMicrotask(preloadArchiveSystem);
             addLog(`Arquivo Digital — Upload v${APP.version} inicializado.`, 'success');
             addLog('O upload foi simplificado: consulta e visualização agora ficam em uma ferramenta separada.', 'info');
         }

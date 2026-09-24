@@ -44,6 +44,8 @@ O Arquivo Digital registra duas entradas no menu (consulta e upload), mas é um 
 
 ## Termos de Compromisso
 
+Consulte também as [novidades e orientações do Arquivo Digital 0.10.0](ged/arquivo-digital.md): cache de alunos, trabalho simultâneo, OCR com IA local e revisão dos envios.
+
 Disponível em **Ferramentas → Adicionar ferramentas → Termos de Compromisso**. Usa a mesma página-base de Requerimentos, preservando o campo de código e a lupa nativa do aluno, com uma página separada para emissão de termos.
 
 1. Selecione o aluno pela lupa ou informe o código. Aguarde a consulta automática ou use **Carregar dados**.
