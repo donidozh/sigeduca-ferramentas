@@ -1,0 +1,7 @@
+node_modules/
+.env*
+configuracao-local/
+sigeduca-automatico/
+*.pdf
+*.csv
+*.xlsx
