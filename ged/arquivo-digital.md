@@ -1,4 +1,10 @@
-# Arquivo Digital 0.10.2
+# Arquivo Digital 0.11.0
+
+A versão 0.11.0 exige um aluno selecionado da planilha antes de enviar ao Drive ou ao GED. Se ainda não existir, use **Cadastrar aluno**: informe nome e nascimento, escolha uma caixa da inicial do nome ou **Abrir nova caixa**. Todas as caixas ficam disponíveis; o técnico escolhe conforme o espaço físico. O serviço confere duplicidade, insere o cadastro e prepara a pasta digital com seu vínculo. Se a preparação da pasta falhar, o cadastro é preservado e uma nova tentativa conclui o vínculo.
+
+**Duplicar página** cria uma cópia independente para classificar dois documentos digitalizados na mesma folha. A cópia contém a folha inteira, sem recorte automático, e pode receber outro tipo e outra rotação. A lista de classificação agora é única, com nomes como RG/CPF Aluno, RG/CPF Responsável, Cartão de Vacina, Tipo Sanguíneo e Certidão de Nascimento.
+
+Novas caixas usam título na linha 1 e as colunas Nº, Nome, Data de nascimento, Pasta Digital e Observações na linha 2, com cabeçalho fixo. O cadastro e a criação de caixas são coordenados pelo serviço para evitar duplicação em acessos simultâneos. Os uploads de pastas diferentes continuam em paralelo.
 
 A versão 0.10.2 usa IndexedDB para guardar o modelo quando a Cache API está indisponível, como em HTTP. Se o armazenamento for recusado ou estiver cheio, o modelo ainda pode ser usado, mas poderá precisar de novo download. As chamadas ao Web App usam a chave configurada, sem cookies de sessões Google. Erros HTTP aparecem como mensagens curtas, sem despejar páginas HTML na interface.
 
@@ -28,7 +34,11 @@ Durante a consulta ou sincronização, a seleção de arquivo fica bloqueada. Ao
 
 Ao abrir a tela de upload, “Carregando o sistema” prepara PDF, OCR em português, IA e o índice do arquivo selecionado, quando o serviço está configurado. Há opção de tentar novamente ou continuar com classificação manual se algum recurso falhar.
 
-O modelo gratuito [multilingual MiniLM](https://huggingface.co/Xenova/paraphrase-multilingual-MiniLM-L12-v2) é baixado automaticamente (aproximadamente 118 MB na versão quantizada) e reutilizado pelo cache do navegador. O primeiro carregamento exige internet e pode demorar. Limpeza do cache ou outro navegador pode exigir novo download. O modelo compara o texto extraído com descrições dos tipos documentais no próprio computador, sem enviar documentos para um serviço de IA. Não é um modelo treinado especificamente nos documentos da escola; revise as sugestões.
+O modelo gratuito [mDeBERTa multilíngue para classificação](https://huggingface.co/onnx-community/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7-ONNX) substitui a comparação de similaridade do MiniLM anterior. O download automático tem aproximadamente 338 MB na versão quantizada, além do leitor de texto e arquivos de execução, e fica no cache do navegador. O primeiro carregamento exige internet e pode demorar. Limpeza do cache ou outro navegador pode exigir novo download. O processamento ocorre no computador, sem enviar documentos ao provedor da IA.
+
+A identificação combina títulos, conjuntos de campos característicos e o classificador. Quando o OCR fica fraco, tenta outras orientações de leitura. Folhas com evidências de mais de um tipo pedem revisão e sugerem duplicação. RG/CPF exige confirmar a titularidade (aluno ou responsável); a IA não decide isso sozinha. Resultados pouco discriminativos ficam como Diversos/revisar. Pontuações não são uma taxa de acerto, e o modelo não foi treinado nos documentos da escola.
+
+Validação da versão: 26 testes do script e 16 do serviço, além de 16 verificações de PDF, imagem, rascunho e duplicação no navegador. O fluxo de cadastro foi conferido com serviço simulado e a listagem de caixas com leitura nas planilhas reais. O classificador foi executado em HTTP sem Web Crypto/Cache API: em 14 textos sintéticos sem títulos explícitos, escolheu o tipo esperado em 11; isso não mede precisão em digitalizações reais. Os erros motivaram regras para campos característicos e critérios conservadores de revisão. Nenhum aluno fictício foi cadastrado nas planilhas reais.
 
 O código do SIGEDUCA aparece somente quando o destino GED está selecionado.
 
@@ -36,7 +46,7 @@ O servidor lê intervalos inteiros, mantém um índice compartilhado comprimido 
 
 ## Backend Google Apps Script
 
-O arquivo `arquivo-digital-backend.gs` contém o serviço 1.2.0. A publicação no GitHub não atualiza automaticamente uma implantação do Apps Script.
+O arquivo `arquivo-digital-backend.gs` contém o serviço 1.3.0, necessário para cadastro e verificação do aluno selecionado. A publicação no GitHub não atualiza automaticamente uma implantação do Apps Script. Nesta atualização, mantenha o endereço da implantação existente e publique uma nova versão do serviço.
 
 Na instalação nova, configure nas **Propriedades do script**:
 

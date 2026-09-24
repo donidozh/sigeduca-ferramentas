@@ -11,7 +11,7 @@ function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={configureLocalModelCache,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyWithLocalAi,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,combineDocumentEvidence,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,configureLocalModelCache,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyWithLocalAi,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,combineDocumentEvidence,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -58,8 +58,9 @@ test('consultas simultâneas idênticas compartilham uma chamada',async()=>{
  await Promise.all([first,second]);assert.equal(t.calls(),1);
 });
 test('atualização de localização recusa homônimos sem escrever no Drive',async()=>{
- const t=fixture(()=>({ok:true,results:[{name:'MARIA SILVA',row:1},{name:'MARIA SILVA',row:2}]}));
- t.state.selectedStudentMatch={name:'MARIA SILVA',root:'PERMANENTE'};
+ const t=fixture(()=>({ok:false,error:'Há homônimos nesta aba.'}));
+ t.state.selectedStudentMatch={name:'MARIA SILVA',root:'PERMANENTE',sheet:'M1',row:3};
+ t.el.studentName={value:'MARIA SILVA'};t.el.studentBirth={value:''};t.el.archiveRoot={value:'PERMANENTE'};
  await assert.rejects(t.refreshSelectedStudent(),/homônimos/);
  assert.equal(t.calls(),1);
 });
@@ -88,8 +89,25 @@ test('IA discordante ou indisponível exige revisão e não aplica automaticamen
  const t=fixture();const rule={key:'ged_historico',confidence:.99,hits:[]};const text='Histórico escolar estudos realizados com carga horária e resultado final';
  assert.equal(t.combineDocumentEvidence(rule,null,text).autoApply,false);
  assert.equal(t.combineDocumentEvidence(rule,{key:'ged_certidao',score:.9,margin:.4},text).autoApply,false);
- assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.2},text).autoApply,true);
+ assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.9,margin:.4},text).autoApply,true);
  assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.01},text).autoApply,false);
+ assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.2},text).autoApply,false);
+});
+
+test('campos característicos reconhecem documentos sem depender do título',()=>{
+ const t=fixture();
+ const samples=[
+  ['ged_certidao','Registro civil das pessoas naturais. Nome. Nascimento. Filiação. Avós. Oficial registrador.'],
+  ['ged_vacina','BCG Hepatite B Pentavalente Poliomielite. Dose data lote assinatura do vacinador.'],
+  ['ged_sangue','Laboratório. Material sangue total. ABO resultado O. Rh positivo.'],
+  ['ged_energia','Unidade consumidora. Consumo 182 kWh. Vencimento da fatura.'],
+  ['ged_oftalmo','Acuidade visual. Olho direito 20/20. Olho esquerdo 20/20.'],
+  ['arquivo_cartao_sus','Sistema Único de Saúde. CNS 700 0000 0000 0000. Nome.']
+ ];
+ for(const [key,text] of samples){const rule=t.classifyText(text);assert.equal(rule.key,key);assert.equal(t.combineDocumentEvidence(rule,null,text).autoApply,true);}
+ const mixed=t.classifyText(samples[1][1]+' '+samples[2][1]);assert.equal(mixed.multipleDocuments,true);assert.equal(t.combineDocumentEvidence(mixed,null,'').autoApply,false);
+ assert.notEqual(t.classifyText('Responsável. Nome do aluno. Data de nascimento. Telefone.').structureMatch,true);
+ const personal=t.combineDocumentEvidence({key:'ged_rgcpf',confidence:.99},{key:'ged_rgcpf',score:.99,margin:.9},'Registro geral do cidadão com CPF e data de nascimento');assert.equal(personal.autoApply,false);assert.match(personal.reason,/responsável/);
 });
 
 const httpCrypto={getRandomValues:array=>webcrypto.getRandomValues(array)};
@@ -157,4 +175,25 @@ test('IA em HTTP persiste modelo no IndexedDB e tolera falta de espaço',async()
  assert.equal(await (await env.customCache.match('model')).text(),'modelo de teste');
  const next={};await t.configureLocalModelCache(next);assert.equal(await (await next.customCache.match('model')).text(),'modelo de teste');
  writesFail=true;await env.customCache.put('other',new Response('sem espaço'));assert.equal(await env.customCache.match('other'),undefined);
+});
+test('seleção exige caixa e identidade atual, sem aceitar só nome digitado',()=>{
+ const t=fixture();t.el.studentName={value:'ALUNO TESTE'};t.el.studentBirth={value:'01/01/2000'};t.el.archiveRoot={value:'PERMANENTE'};
+ assert.equal(t.hasRegisteredSelection(),false);
+ t.state.selectedStudentMatch={name:'ALUNO TESTE',birth:'01/01/2000',root:'PERMANENTE',sheet:'A1',row:3};assert.equal(t.hasRegisteredSelection(),true);
+ t.el.archiveRoot.value='FORMANDOS';assert.equal(t.hasRegisteredSelection(),false);t.el.archiveRoot.value='PERMANENTE';t.el.studentName.value='OUTRO ALUNO';assert.equal(t.hasRegisteredSelection(),false);
+});
+test('duplicação mantém origem e rotação, com identidade e classificação independentes',()=>{
+ const t=fixture();t.state.pageModels=[{id:'first',originalPage:2,rotation:90,docKey:'ged_rgcpf',manual:true}];
+ const copy=t.duplicatePageModel('first');assert.equal(copy.originalPage,2);assert.equal(copy.rotation,90);assert.notEqual(copy.id,'first');assert.equal(copy.docKey,'ignore');
+ copy.docKey='ged_responsavel';copy.rotation=180;assert.equal(t.state.pageModels[0].docKey,'ged_rgcpf');assert.equal(t.state.pageModels[0].rotation,90);
+});
+test('lista única apresenta nomes específicos e mantém os códigos dos documentos',()=>{
+ const html=fixture().makeDocumentOptions('ged_vacina');assert.ok(!html.includes('optgroup'));
+ for(const name of ['RG/CPF Responsável','RG/CPF Aluno','Cartão de Vacina','Certidão de Nascimento','Tipo Sanguíneo'])assert.ok(html.includes(name));assert.match(html,/value="ged_vacina"[^>]*selected/);
+});
+test('títulos curtos valem mais que semântica genérica e folha com dois tipos exige revisão',()=>{
+ const t=fixture();for(const [text,key] of [['CERTIDÃO DE NASCIMENTO','ged_certidao'],['CARTÃO DE VACINA','ged_vacina'],['TIPAGEM SANGUÍNEA','ged_sangue'],['HISTÓRICO ESCOLAR','ged_historico']]){
+  const result=t.combineDocumentEvidence(t.classifyText(text),{key:'arquivo_diversos',score:.4,margin:.1},text);assert.equal(result.key,key);assert.equal(result.autoApply,true);
+ }
+ const both='CERTIDÃO DE NASCIMENTO e CARTÃO DE VACINA';const result=t.combineDocumentEvidence(t.classifyText(both),null,both);assert.equal(result.autoApply,false);assert.match(result.reason,/duplique/);
 });

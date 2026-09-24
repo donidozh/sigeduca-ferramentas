@@ -60,3 +60,58 @@ test('paginação não mistura versões diferentes do índice',()=>{
  const {c}=fixture();c.SpreadsheetApp={openById:()=>({getSheets:()=>[{getSheetId:()=>1}]})};
  assert.throws(()=>c.getStudentIndexAction_({root:'PERMANENTE',offset:1000,version:'old'}),e=>e.code==='INDEX_CHANGED');
 });
+
+function registrationFixture(){
+ const f=fixture(),{c}=f;let nextId=1;const sheets=[];
+ function add(name,rows=[['CAIXA '+name],['Nº','Nome','Data de nascimento','Pasta Digital','Observações']]){
+  const id=nextId++;let maxRows=1000;
+  const sh={rows,getName:()=>name,getSheetId:()=>id,getLastRow:()=>rows.length,getLastColumn:()=>Math.max(5,...rows.map(r=>r.length)),getMaxRows:()=>maxRows,getMaxColumns:()=>26,insertRowsAfter:(_,n)=>maxRows+=n};
+  sh.getRange=(r,col,n=1,width=1)=>{
+   const range={getDisplayValues:()=>Array.from({length:n},(_,i)=>Array.from({length:width},(_,j)=>String(rows[r+i-1]?.[col+j-1]??''))),getDisplayValue:()=>String(rows[r-1]?.[col-1]??''),getFormula:()=>'',getFormulas:()=>Array.from({length:n},()=>['']),getRichTextValue:()=>null,getRichTextValues:()=>Array.from({length:n},()=>[null]),setValues:values=>{values.forEach((v,i)=>{rows[r+i-1]||=[];v.forEach((x,j)=>rows[r+i-1][col+j-1]=x);});return range;},setValue:value=>range.setValues([[value]])};
+   for(const method of ['merge','setNumberFormat','setFontWeight','setBackground','setFontFamily','setFontColor','setHorizontalAlignment','setVerticalAlignment','setWrap'])range[method]=()=>range;
+   return range;
+  };
+  sh.getDataRange=()=>sh.getRange(1,1,rows.length,sh.getLastColumn());
+  for(const method of ['setFrozenRows','setColumnWidth','setRowHeights'])sh[method]=()=>sh;
+  sheets.push(sh);return sh;
+ }
+ const ss={getSheets:()=>sheets,getSheetByName:name=>sheets.find(s=>s.getName()===name),insertSheet:name=>add(name,[])};
+ c.SpreadsheetApp={openById:()=>ss,flush(){}};c.invalidateIndex_=()=>{};
+ c.prepareStudentFolder_=(student,loc)=>{loc.sheet.rows[loc.row-1][3]='https://drive.google.com/drive/folders/folder-'+loc.sheet.getName();};
+ c.folderFromUrl_=url=>url?{getId:()=>url.split('/').pop(),getUrl:()=>url}:null;c.assertFolderIsArchiveChild_=()=>{};
+ return {...f,add,sheets,ss};
+}
+test('serviço recusa pasta e envio sem aluno localizado na planilha',()=>{
+ const {c}=fixture();c.DriveApp={getFolderById:()=>({})};c.assertFolderIsArchiveChild_=()=>{};
+ assert.throws(()=>c.ensureStudentFolderAction_({student:{root:'PERMANENTE',name:'TESTE'}}),/Selecione um aluno cadastrado/);
+ assert.throws(()=>c.uploadDocumentAction_({student:{root:'PERMANENTE',name:'TESTE'},folderId:'folder'}),/Selecione um aluno cadastrado/);
+});
+test('caixas filtram inicial com acento e propõem próxima numeração sem limite físico',()=>{
+ const {c,add}=registrationFixture();add('A1');add('A3');add('M1');add('MAGISTÉRIO A-1');
+ const result=c.listBoxesAction_({root:'PERMANENTE',name:'Álvaro Teste'});
+ assert.equal(result.letter,'A');assert.equal(result.nextBox,'A4');assert.deepEqual(Array.from(result.boxes,b=>b.name),['A1','A3']);
+});
+test('cadastro insere aluno, prepara vínculo e repetição não duplica',()=>{
+ const {c,add,sheets}=registrationFixture();const box=add('A1');
+ const payload={student:{root:'PERMANENTE',name:'ÁLVARO TESTE',birth:'25/03/2010'},sheet:'A1'};
+ const first=c.registerStudentAction_(payload);assert.equal(first.student.row,3);assert.match(first.student.folderUrl,/folders/);assert.equal(box.rows[2][1],'ÁLVARO TESTE');
+ assert.equal(c.registerStudentAction_(payload).duplicate,true);assert.equal(box.rows.length,3);assert.equal(sheets.length,1);
+});
+test('nova caixa segue cabeçalho e não é recriada quando resposta é repetida',()=>{
+ const {c,add,sheets}=registrationFixture();add('M1');
+ const payload={student:{root:'PERMANENTE',name:'MARIA TESTE',birth:'01/01/2000'},sheet:'M2',createBox:true};
+ const first=c.registerStudentAction_(payload);assert.equal(first.student.sheet,'M2');assert.equal(sheets[1].rows[1][4],'Observações');
+ assert.equal(c.registerStudentAction_(payload).duplicate,true);assert.equal(sheets.length,2);
+ assert.throws(()=>c.registerStudentAction_({...payload,student:{...payload.student,name:'MARTA TESTE'}}),/lista de caixas mudou/);
+});
+test('cadastro bloqueia letra errada e data inválida sem inserir linhas',()=>{
+ const {c,add}=registrationFixture();const box=add('M1');
+ assert.throws(()=>c.registerStudentAction_({student:{root:'PERMANENTE',name:'ALUNO',birth:'01/01/2000'},sheet:'M1'}),/letra A/);
+ assert.throws(()=>c.registerStudentAction_({student:{root:'PERMANENTE',name:'ALUNO',birth:'31/02/2000'},sheet:'M1'}),/Data de nascimento/);assert.equal(box.rows.length,2);
+});
+test('falha de pasta conserva cadastro e permite concluir no reenvio',()=>{
+ const {c,add}=registrationFixture();const box=add('A1'),prepare=c.prepareStudentFolder_;c.prepareStudentFolder_=()=>{throw Error('Drive indisponível');};
+ const payload={student:{root:'PERMANENTE',name:'ALUNO TESTE',birth:'01/01/2000'},sheet:'A1'};
+ assert.match(c.registerStudentAction_(payload).warning,/cadastrado/);c.prepareStudentFolder_=prepare;
+ const second=c.registerStudentAction_(payload);assert.equal(second.duplicate,true);assert.match(second.student.folderUrl,/folders/);assert.equal(box.rows.length,3);
+});

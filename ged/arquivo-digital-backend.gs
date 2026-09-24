@@ -1,11 +1,11 @@
 /**
- * Arquivo Digital — serviço Google Apps Script 1.2.0.
+ * Arquivo Digital — serviço Google Apps Script 1.3.0.
  * Configure API_TOKEN, ROOT_PERMANENTE, ROOT_FORMANDOS,
  * SHEET_PERMANENTE e SHEET_FORMANDOS nas Propriedades do script.
  * Não publique chaves ou configurações privadas no repositório.
  */
 const CONFIG = Object.freeze({
-  VERSION: '1.2.0',
+  VERSION: '1.3.0',
   API_TOKEN: PropertiesService.getScriptProperties().getProperty('API_TOKEN') || '',
   ROOT_FOLDERS: Object.freeze({
     PERMANENTE: PropertiesService.getScriptProperties().getProperty('ROOT_PERMANENTE') || '',
@@ -17,7 +17,7 @@ const CONFIG = Object.freeze({
   }),
   LINK_HEADER: 'PASTA DIGITAL', LINK_TEXT: '📁 Pasta Digital', MAX_BASE64_CHARS: 12 * 1024 * 1024
 });
-const BACKEND_VERSION = '1.2.0';
+const BACKEND_VERSION = '1.3.0';
 const INDEX_TTL_SECONDS = 900;
 
 function doGet() { return json_({ok:true,service:'Arquivo Digital',version:BACKEND_VERSION}); }
@@ -25,7 +25,7 @@ function doPost(e) {
   try {
     const payload=JSON.parse(e && e.postData && e.postData.contents || '{}');
     authorize_(payload);
-    const handlers={ping:()=>({ok:true,message:'Arquivo Digital conectado.',version:BACKEND_VERSION,capabilities:['studentIndex','idempotentUpload','parallelFolders']}),searchStudents:searchStudentsAction_,getStudentIndex:getStudentIndexAction_,ensureStudentFolder:ensureStudentFolderAction_,uploadDocument:uploadDocumentAction_,listStudentDocuments:listStudentDocumentsAction_};
+    const handlers={ping:()=>({ok:true,message:'Arquivo Digital conectado.',version:BACKEND_VERSION,capabilities:['studentIndex','idempotentUpload','parallelFolders','studentRegistration']}),listBoxes:listBoxesAction_,registerStudent:registerStudentAction_,verifyStudent:verifyStudentAction_,searchStudents:searchStudentsAction_,getStudentIndex:getStudentIndexAction_,ensureStudentFolder:ensureStudentFolderAction_,uploadDocument:uploadDocumentAction_,listStudentDocuments:listStudentDocumentsAction_};
     if(!Object.prototype.hasOwnProperty.call(handlers,payload.action))throw new Error('Ação não reconhecida.');
     return json_(handlers[payload.action](payload));
   }catch(error){console.error(error.message);return json_({ok:false,error:error.message || String(error),code:error.code || 'ERROR',retryable:error.code==='BUSY'});}
@@ -87,14 +87,14 @@ function readSheetRecords_(sheet,root){
 }
 
 // Immutable compressed chunks avoid CacheService's per-entry size limit and torn snapshots.
-function indexEpoch_(root){return PropertiesService.getScriptProperties().getProperty('ad:index:epoch:'+root)||'0';}
+function indexEpoch_(root){return PropertiesService.getScriptProperties().getProperty('ad:index:v2:epoch:'+root)||'0';}
 function invalidateIndex_(root,sheetId){
-  PropertiesService.getScriptProperties().setProperty('ad:index:epoch:'+root,Utilities.getUuid());
-  if(sheetId)CacheService.getScriptCache().remove('ad:sheet:'+root+':'+sheetId);
+  PropertiesService.getScriptProperties().setProperty('ad:index:v2:epoch:'+root,Utilities.getUuid());
+  if(sheetId)CacheService.getScriptCache().remove('ad:sheet:v2:'+root+':'+sheetId);
 }
 function readCachedSheets_(root,sheets,force){
   const cache=CacheService.getScriptCache();
-  const keys=sheets.map(sheet=>'ad:sheet:'+root+':'+sheet.getSheetId());
+  const keys=sheets.map(sheet=>'ad:sheet:v2:'+root+':'+sheet.getSheetId());
   const cached=force?{}:cache.getAll(keys),records=[];
   for(let i=0;i<sheets.length;i++){
     let rows=null;
@@ -109,7 +109,7 @@ function readCachedSheets_(root,sheets,force){
   return records;
 }
 function cachedIndex_(root){
-  const cache=CacheService.getScriptCache(),epoch=indexEpoch_(root),prefix='ad:index:'+root+':'+epoch;
+  const cache=CacheService.getScriptCache(),epoch=indexEpoch_(root),prefix='ad:index:v2:'+root+':'+epoch;
   try{
     const raw=cache.get(prefix);if(!raw)return null;const manifest=JSON.parse(raw);
     const keys=Array.from({length:manifest.parts},(_,i)=>manifest.chunkPrefix+':'+i);const chunks=cache.getAll(keys);
@@ -131,7 +131,7 @@ function studentIndex_(root,force,progress){
   if(indexEpoch_(root)!==epoch)throw busy_();
   const createdAt=Date.now();const index={records,version:Utilities.getUuid(),createdAt,expiresAt:createdAt+INDEX_TTL_SECONDS*1000,epoch};
   const packed=Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(index),'application/json')).getBytes());
-  const cache=CacheService.getScriptCache(),prefix='ad:index:'+root+':'+epoch,chunkPrefix=prefix+':'+index.version,parts={};
+  const cache=CacheService.getScriptCache(),prefix='ad:index:v2:'+root+':'+epoch,chunkPrefix=prefix+':'+index.version,parts={};
   for(let i=0;i<packed.length;i+=80000)parts[chunkPrefix+':'+i/80000]=packed.slice(i,i+80000);
   try {cache.putAll(parts,INDEX_TTL_SECONDS);cache.put(prefix,JSON.stringify({chunkPrefix,parts:Object.keys(parts).length}),INDEX_TTL_SECONDS);}catch(error){console.warn('Índice não coube no cache: '+error.message);}
   return index;
@@ -187,7 +187,7 @@ function folderFromUrl_(url){const m=String(url||'').match(/^https:\/\/drive\.go
 function assertFolderIsArchiveChild_(folder,root){const parents=folder.getParents();while(parents.hasNext()){if(parents.next().getId()===CONFIG.ROOT_FOLDERS[root])return;}throw new Error('A pasta não pertence ao arquivo selecionado.');}
 function folderByName_(student){const matches=DriveApp.getFolderById(CONFIG.ROOT_FOLDERS[student.root]).getFoldersByName(studentFolderName_(student));if(!matches.hasNext())return null;const folder=matches.next();if(matches.hasNext())throw new Error('Há pastas duplicadas para este aluno. Confira o vínculo na planilha.');return folder;}
 function locationForStudent_(student){
-  if(!student.physicalSheet)return null;
+  if(!student.physicalSheet)throw new Error('Selecione um aluno cadastrado na planilha antes de enviar documentos.');
   const sheet=SpreadsheetApp.openById(CONFIG.SPREADSHEETS[student.root]).getSheetByName(student.physicalSheet);if(!sheet)throw new Error('Aba do aluno não encontrada.');
   const columns=detectColumnsForSearch_(sheet),row=resolveStudentRow_(sheet,student,columns);
   let folder=null;
@@ -200,15 +200,18 @@ function ensureStudentFolderAction_(payload){
   // Only preparation/linking is serialized. File bytes are handled under per-folder leases.
   return withScriptLock_(()=>{
     const loc=locationForStudent_(student);
-    const folder=(loc&&loc.folder)||folderByName_(student)||DriveApp.getFolderById(CONFIG.ROOT_FOLDERS[student.root]).createFolder(studentFolderName_(student));
-    let folderCol=loc?loc.columns.folderCol:0;
-    if(loc&&(!loc.folder||loc.folder.getId()!==folder.getId())){
+    return prepareStudentFolder_(student,loc);
+  });
+}
+function prepareStudentFolder_(student,loc){
+    const folder=loc.folder||folderByName_(student)||DriveApp.getFolderById(CONFIG.ROOT_FOLDERS[student.root]).createFolder(studentFolderName_(student));
+    let folderCol=loc.columns.folderCol;
+    if(!loc.folder||loc.folder.getId()!==folder.getId()){
       if(!folderCol){folderCol=loc.sheet.getLastColumn()+1;if(folderCol>loc.sheet.getMaxColumns())loc.sheet.insertColumnsAfter(loc.sheet.getMaxColumns(),folderCol-loc.sheet.getMaxColumns());loc.sheet.getRange(loc.columns.headerRow,folderCol).setValue(CONFIG.LINK_HEADER);}
       loc.sheet.getRange(loc.row,folderCol).setRichTextValue(SpreadsheetApp.newRichTextValue().setText(CONFIG.LINK_TEXT).setLinkUrl(folder.getUrl()).build());
       SpreadsheetApp.flush();invalidateIndex_(student.root,loc.sheet.getSheetId());
     }
-    return {ok:true,folderId:folder.getId(),folderUrl:folder.getUrl(),folderName:folder.getName(),physicalRow:loc?loc.row:0,folderCol,warning:loc?'':'Sem aba informada; pasta preparada sem vínculo na planilha.'};
-  });
+    return {ok:true,folderId:folder.getId(),folderUrl:folder.getUrl(),folderName:folder.getName(),physicalRow:loc.row,folderCol,warning:''};
 }
 function findStudentFolder_(student){const loc=locationForStudent_(student);return loc&&loc.folder||folderByName_(student);}
 function documentInfo_(file,type){return {id:file.getId(),name:file.getName(),type:type||inferTypeFromFilename_(file.getName()),url:file.getUrl(),previewUrl:'https://drive.google.com/file/d/'+file.getId()+'/preview',size:file.getSize()};}
@@ -242,7 +245,97 @@ function listStudentDocumentsAction_(payload){
 }
 function inferTypeFromFilename_(name){const text=normalize_(name);for(const [pattern,type] of [[/HISTOR/,'Histórico Escolar'],[/FICHA INDIVIDUAL/,'Ficha Individual'],[/MATRIC/,'Ficha de Matrícula'],[/ATESTADO/,'Atestado Médico'],[/CERTIFIC|DIPLOMA/,'Certificado / Diploma'],[/SUS/,'Cartão SUS'],[/PAED/,'Documentos PAEDE'],[/TERMO/,'Termo de Compromisso']])if(pattern.test(text))return type;return 'Documento';}
 
+function studentInitial_(name){const letter=normalize_(name).charAt(0);if(!/^[A-Z]$/.test(letter))throw new Error('O nome deve começar com uma letra de A a Z.');return letter;}
+function boxParts_(name){const m=normalize_(name).match(/^([A-Z])(\d+)$/);return m?{letter:m[1],number:Number(m[2])}:null;}
+function nextBoxName_(sheets,letter){return letter+(Math.max(0,...sheets.map(s=>boxParts_(s.getName())).filter(p=>p&&p.letter===letter).map(p=>p.number))+1);}
+function listBoxesAction_(payload){
+  const root=root_(payload.root),letter=studentInitial_(payload.name),ss=SpreadsheetApp.openById(CONFIG.SPREADSHEETS[root]),sheets=ss.getSheets();
+  const boxes=sheets.filter(s=>{const p=boxParts_(s.getName());return p&&p.letter===letter;}).map(sheet=>{
+    const schema=detectColumnsForSearch_(sheet);
+    return {name:sheet.getName(),sheetId:sheet.getSheetId(),count:readSheetRecords_(sheet,root).length,writable:Boolean(schema.headerRow&&schema.nameCol&&schema.birthCol)};
+  }).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  return {ok:true,root,letter,boxes,nextBox:nextBoxName_(sheets,letter)};
+}
+function registeredRecord_(student,loc){return {root:student.root,sheet:loc.sheet.getName(),row:loc.row,name:student.name,birth:student.birth,folderUrl:loc.folder?loc.folder.getUrl():'',nameCol:loc.columns.nameCol,birthCol:loc.columns.birthCol,folderCol:loc.columns.folderCol};}
+function verifyStudentAction_(payload){
+  const student=validateStudent_(payload.student),loc=locationForStudent_(student);
+  return {ok:true,student:registeredRecord_(student,loc)};
+}
+function validateRegistration_(value){
+  const student=validateStudent_(value);student.name=student.name.replace(/\s+/g,' ').trim();studentInitial_(student.name);
+  if(student.name.length<3||student.name.length>150)throw new Error('Informe o nome completo do aluno.');
+  const m=student.birth.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(!m)throw new Error('Informe a data de nascimento completa.');
+  const day=Number(m[1]),month=Number(m[2]),year=Number(m[3]),date=new Date(year,month-1,day);
+  if(year<1900||date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day||date>Date.now())throw new Error('Data de nascimento inválida.');
+  return student;
+}
+function registrationMatches_(ss,student){
+  // Fresh rows, under the same lock as insertion. Do not rely on a cached index here.
+  const letter=studentInitial_(student.name),matches=[];
+  for(const sheet of ss.getSheets()){
+    const parts=boxParts_(sheet.getName());if(normalize_(sheet.getName())==='INICIO'||(parts&&parts.letter!==letter))continue;
+    for(const row of readSheetRecords_(sheet,student.root)){
+      if(normalize_(row.name)!==normalize_(student.name))continue;
+      if(!row.birth)throw new Error('Já existe aluno com este nome sem nascimento. Confira o cadastro existente antes de inserir.');
+      if(row.birth===student.birth)matches.push(row);
+    }
+  }
+  return matches;
+}
+function createArchiveBox_(ss,root,name){
+  const sheet=ss.insertSheet(name);
+  sheet.getRange(1,1,1,5).merge().setValue('CAIXA '+name+' — '+(root==='PERMANENTE'?'ARQUIVO PERMANENTE':'FORMANDOS'));
+  sheet.getRange(2,1,1,5).setValues([['Nº','Nome','Data de nascimento','Pasta Digital','Observações']]);
+  sheet.getRange(1,1,2,5).setFontWeight('bold').setFontFamily('Arial').setFontColor('#ffffff').setBackground('#1f3352').setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+  sheet.setRowHeights(1,2,34);sheet.setFrozenRows(2);sheet.setColumnWidth(1,55);sheet.setColumnWidth(2,350);sheet.setColumnWidth(3,155);sheet.setColumnWidth(4,150);sheet.setColumnWidth(5,230);
+  return sheet;
+}
+function registerStudentAction_(payload){
+  const student=validateRegistration_(payload.student),letter=studentInitial_(student.name);
+  return withScriptLock_(()=>{
+    const ss=SpreadsheetApp.openById(CONFIG.SPREADSHEETS[student.root]),matches=registrationMatches_(ss,student);
+    if(matches.length>1)throw new Error('Há cadastros duplicados deste aluno. Confira as caixas antes de enviar.');
+    let sheet,duplicate=matches.length===1;
+    if(duplicate){student.physicalSheet=matches[0].sheet;student.name=matches[0].name;}
+    else{
+      const desired=String(payload.sheet||'').trim(),parts=boxParts_(desired);
+      if(!parts||parts.letter!==letter)throw new Error('Escolha uma caixa da letra '+letter+'.');
+      if(payload.createBox===true){
+        if(desired!==nextBoxName_(ss.getSheets(),letter))throw new Error('A lista de caixas mudou. Atualize e escolha a nova caixa novamente.');
+        sheet=createArchiveBox_(ss,student.root,desired);
+      }else sheet=ss.getSheetByName(desired);
+      if(!sheet)throw new Error('Caixa não encontrada.');
+      const columns=detectColumnsForSearch_(sheet);
+      if(!columns.headerRow||!columns.nameCol||!columns.birthCol)throw new Error('Cabeçalho da caixa não identificado. Nenhum aluno foi inserido.');
+      const row=sheet.getLastRow()+1,width=Math.max(sheet.getLastColumn(),columns.nameCol,columns.birthCol);
+      if(row>sheet.getMaxRows())sheet.insertRowsAfter(sheet.getMaxRows(),1);
+      const values=Array(width).fill('');values[columns.nameCol-1]=student.name;values[columns.birthCol-1]=student.birth;
+      const firstHeader=normalize_(sheet.getRange(columns.headerRow,1).getDisplayValue());
+      if(/^(N[º°O.]?|NUMERO)$/.test(firstHeader)&&columns.nameCol!==1){
+        const numbers=sheet.getRange(columns.headerRow+1,1,Math.max(1,row-columns.headerRow-1),1).getDisplayValues().map(r=>Number(r[0])).filter(Number.isFinite);
+        values[0]=Math.max(0,...numbers)+1;
+      }
+      sheet.getRange(row,columns.birthCol).setNumberFormat('@');
+      sheet.getRange(row,1,1,width).setValues([values]);SpreadsheetApp.flush();
+      invalidateIndex_(student.root,sheet.getSheetId());student.physicalSheet=sheet.getName();
+    }
+    const loc=locationForStudent_(student);let warning='';
+    try{prepareStudentFolder_(student,loc);}catch(error){warning='Aluno cadastrado; a pasta será preparada ao reenviar: '+error.message;}
+    const finalLoc=locationForStudent_(student);
+    return {ok:true,duplicate,student:registeredRecord_(student,finalLoc),warning};
+  });
+}
+
 /** Manual read-only smoke check: reports only counts and timings, never names or keys. */
+function diagnosticarCadastroArquivoDigital() {
+  for(const root of ['PERMANENTE','FORMANDOS']){
+    const started=Date.now(),result=listBoxesAction_({root,name:'Z'});
+    if(result.boxes.some(box=>!box.writable||!box.name.startsWith('Z')))throw new Error('Cabeçalho ou filtro de caixa inválido.');
+    console.log(JSON.stringify({version:BACKEND_VERSION,root,letter:result.letter,boxes:result.boxes.length,nextBox:result.nextBox,elapsedMs:Date.now()-started}));
+  }
+}
+
 function diagnosticarArquivoDigital() {
   for (const root of ['PERMANENTE','FORMANDOS']) {
     const started=Date.now();const first=studentIndex_(root,true,true);const readMs=Date.now()-started;
