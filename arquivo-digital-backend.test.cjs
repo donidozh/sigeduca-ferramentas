@@ -75,7 +75,7 @@ function registrationFixture(){
   for(const method of ['setFrozenRows','setColumnWidth','setRowHeights'])sh[method]=()=>sh;
   sheets.push(sh);return sh;
  }
- const ss={getSheets:()=>sheets,getSheetByName:name=>sheets.find(s=>s.getName()===name),insertSheet:name=>add(name,[])};
+ const ss={getSheets:()=>sheets,getSheetByName:name=>sheets.find(s=>s.getName()===name),insertSheet:(name,index)=>{const sheet=add(name,[]);sheets.pop();sheets.splice(index===undefined?sheets.length:index,0,sheet);return sheet;}};
  c.SpreadsheetApp={openById:()=>ss,flush(){}};c.invalidateIndex_=()=>{};
  c.prepareStudentFolder_=(student,loc)=>{loc.sheet.rows[loc.row-1][3]='https://drive.google.com/drive/folders/folder-'+loc.sheet.getName();};
  c.folderFromUrl_=url=>url?{getId:()=>url.split('/').pop(),getUrl:()=>url}:null;c.assertFolderIsArchiveChild_=()=>{};
@@ -129,4 +129,21 @@ test('histórico incremental perdido ou alteração durante leitura exige recupe
  const before=c.indexEpoch_('PERMANENTE');c.invalidateIndex_('PERMANENTE',1);
  c.SpreadsheetApp={openById:()=>({getSheets:()=>[{getSheetId:()=>1}]})};c.readSheetRecords_=()=>{c.invalidateIndex_('PERMANENTE',1);return [];};
  assert.throws(()=>c.getStudentChangesAction_({root:'PERMANENTE',epoch:before}),e=>e.code==='BUSY');
+});
+
+
+test('novas caixas entram após a anterior com ordenação numérica e preservam demais abas',()=>{
+ for(const [names,created,expected] of [
+  [['INÍCIO','A1','A5','B1'],'A6',['INÍCIO','A1','A5','A6','B1']],
+  [['INÍCIO','I4','J8','K1'],'J9',['INÍCIO','I4','J8','J9','K1']],
+  [['INÍCIO','A9','A10','B1'],'A11',['INÍCIO','A9','A10','A11','B1']],
+  [['INÍCIO','A1','A5','B1'],'A4',['INÍCIO','A1','A4','A5','B1']],
+  [['INÍCIO','A3','C1'],'B1',['INÍCIO','A3','B1','C1']],
+  [['INÍCIO','B1'],'A1',['INÍCIO','A1','B1']],
+  [['INÍCIO','ORIENTAÇÕES'],'A1',['INÍCIO','ORIENTAÇÕES','A1']],
+  [['INÍCIO','J8','J2','K1'],'J9',['INÍCIO','J8','J9','J2','K1']]
+ ]){
+  const {c,add,ss,sheets}=registrationFixture();names.forEach(name=>add(name));
+  c.createArchiveBox_(ss,'PERMANENTE',created);assert.deepEqual(sheets.map(sheet=>sheet.getName()),expected);
+ }
 });

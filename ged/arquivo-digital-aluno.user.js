@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.14.0
+// @version      0.14.1
 // @description  Arquivo Digital com consulta e inclusão de pastas, documentos, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.14.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.14.1',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.14.0'
+            versao: '0.14.1'
         }
     ]);
 
@@ -78,7 +78,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.14.0',
+        version: '0.14.1',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -2823,6 +2823,7 @@
         GM_setValue(APP.driveEndpointKey, validatedEndpoint);
         GM_setValue(APP.driveTokenKey, token.trim());
         atualizarDriveStatus();
+        if(el.workspaceTabs)initializeStudentIndexes();
 
         testDriveConnection().catch(error => {
             alert(`Configuração salva, mas o teste falhou:\n${error.message}`);
@@ -3659,6 +3660,7 @@
         do{
             if(indexGeneration(id)!==generation||storeKey!==await searchCacheKey())throw new Error('Atualização interrompida; dados locais preservados.');
             const progress='Sincronizando '+root+' · '+records.length+' nomes...';
+            if(state.indexBootProgress)state.indexBootProgress(root,records.length,false);
             if(el.cacheStatus&&(el.archiveRoot.value===root||(state.syncingIndex&&el.indexRoot?.value===root)))el.cacheStatus.textContent=progress;
 
             const data=parseDriveResponse(await drivePostJson({action:'getStudentIndex',root,offset,version,createdAt:snapshot?.createdAt,forceRefresh}));
@@ -3784,6 +3786,7 @@
         const overlay=document.createElement('div');overlay.id=`${APP.id}-loading`;
         overlay.style.cssText='position:fixed;inset:0;z-index:2147483500;background:#f3f6fa;display:grid;place-items:center;font:14px Arial;color:#23334b';
         overlay.innerHTML='<section style="width:min(480px,90vw);background:white;border:1px solid #dce3ed;border-radius:18px;padding:32px;box-shadow:0 12px 45px #21334b12"><h1 style="font-size:23px;margin:0 0 8px">Carregando o sistema</h1><p style="color:#66758b">Preparando o Arquivo Digital neste computador.</p><ul style="list-style:none;padding:0;line-height:2.2"><li data-boot="pdf">◌ Leitor de PDF</li><li data-boot="ocr">◌ OCR em português</li></ul><p class="boot-message" role="status" style="font-size:12px;color:#66758b">Preparando a leitura de PDFs e o OCR em português.</p><button class="boot-retry" hidden style="padding:10px">Tentar novamente</button><button class="boot-manual" style="padding:10px;margin-top:12px">Continuar com classificação manual</button></section>';
+        overlay.querySelector('section').prepend(createLoadingSpinner());
         document.body.append(overlay);overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');el.app.inert=true;setBusy(true);state.cancelled=false;
         const manual=()=>{if(generation!==state.bootGeneration)return;state.bootGeneration++;overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('Pré-carregamento interrompido. Clique em Identificar documentos para tentar novamente.','error');};
         overlay.querySelector('.boot-manual').onclick=manual;
@@ -3812,6 +3815,63 @@
         if(generation!==state.bootGeneration)return;
         if(results.every(Boolean)){overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('PDF e OCR prontos.','ok');updateProgress(0,'Sistema pronto');}
         else{overlay.querySelector('.boot-retry').hidden=false;overlay.querySelector('.boot-message').textContent=failures.join(' • ')+' — Tente novamente ou continue com classificação manual.';}
+    }
+
+    function createLoadingSpinner() {
+        const spinner=document.createElement('div');spinner.className='ad-loading-spinner';spinner.setAttribute('aria-hidden','true');return spinner;
+    }
+
+    async function ensureInitialStudentIndexes(report=()=>{}) {
+        if(!GM_getValue(APP.driveEndpointKey,'')||!GM_getValue(APP.driveTokenKey,''))throw new Error('Configure a conexão com o Google Drive para preparar as listas.');
+        const key=await searchCacheKey(),roots=['PERMANENTE','FORMANDOS'];
+        for(const root of roots){
+            let index=GM_getValue(key+':index:'+root,null);
+            if(!usableIndex(index)){
+                report(root,0,false);
+                // Confere o serviço somente se faltar um índice; abrir com cache não depende da rede.
+                if(!state.indexSupported){
+                    const ping=parseDriveResponse(await drivePostJson({action:'ping'}));
+                    if(!ping.ok||!ping.capabilities?.includes('studentIndex'))throw new Error(ping.error||'O serviço precisa oferecer a sincronização de índices.');
+                    state.indexSupported=true;state.changesSupported=Boolean(ping.capabilities.includes('studentChanges'));
+                }
+                index=await refreshStudentIndex(root);
+                if(!usableIndex(index))throw new Error('O índice de '+root+' não foi concluído.');
+            }
+            if(key!==await searchCacheKey())throw new Error('A conexão foi alterada. Tente novamente.');
+            report(root,index.records.length,true);
+        }
+    }
+
+    function initializeStudentIndexes() {
+        if(state.indexBootPromise)return state.indexBootPromise;
+        state.initialIndexCheckPending=true;
+        let overlay=document.getElementById(`${APP.id}-index-loading`);
+        if(!overlay){
+            overlay=document.createElement('div');overlay.id=`${APP.id}-index-loading`;overlay.className='ad-index-loading';
+            overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-labelledby',`${APP.id}-index-title`);
+            overlay.innerHTML=`<section><h1 id="${APP.id}-index-title">Carregando o sistema</h1><p>Preparando as listas neste computador. No primeiro acesso, isso pode levar alguns minutos.</p><ul><li data-root="PERMANENTE">◌ Permanente · verificando índice</li><li data-root="FORMANDOS">◌ Formandos · verificando índice</li></ul><p class="index-message" role="status">O sistema será liberado quando os dois índices estiverem prontos.</p><div class="index-actions" hidden><button type="button" class="index-retry">Tentar novamente</button><button type="button" class="index-config">Configurar conexão</button></div></section>`;
+            overlay.querySelector('section').prepend(createLoadingSpinner());document.body.append(overlay);
+            overlay.querySelector('.index-retry').onclick=initializeStudentIndexes;
+            overlay.querySelector('.index-config').onclick=configureDriveEndpoint;
+        }
+        overlay.querySelector('.index-actions').hidden=true;overlay.classList.remove('has-error');
+        overlay.querySelector('.index-message').textContent='O sistema será liberado quando os dois índices estiverem prontos.';
+        el.app.inert=true;setBusy(true);
+        state.indexBootProgress=(root,count,ready)=>{
+            const line=overlay.querySelector(`[data-root="${root}"]`);
+            if(line)line.textContent=(ready?'✓ ':'◌ ')+(root==='PERMANENTE'?'Permanente':'Formandos')+' · '+count+' nomes'+(ready?' · pronto':' · carregando…');
+        };
+        state.indexBootPromise=(async()=>{
+            try{
+                await ensureInitialStudentIndexes(state.indexBootProgress);
+                overlay.remove();state.initialIndexCheckPending=false;el.app.inert=false;setBusy(false);renderConsultStudentHero();
+                if(state.workspaceTab==='incluir'&&!state.workspacePreloaded){state.workspacePreloaded=true;queueMicrotask(preloadArchiveSystem);}
+            }catch(error){
+                overlay.classList.add('has-error');overlay.querySelector('.index-message').textContent=error.message+' Os índices já concluídos foram preservados.';
+                overlay.querySelector('.index-actions').hidden=false;overlay.querySelector('.index-retry').focus();
+            }finally{state.indexBootPromise=null;state.indexBootProgress=null;}
+        })();
+        return state.indexBootPromise;
     }
 
     // As abas compartilham a seleção e os mesmos elementos do editor.
@@ -3880,6 +3940,21 @@
         // Associa os rótulos existentes aos campos para teclado e leitores de tela.
         app.querySelectorAll('label').forEach(label=>{const input=label.parentElement.querySelector('input,select');if(input?.id)label.htmlFor=input.id;});
         const style=document.createElement('style');style.textContent=`
+            @keyframes ad-loading-spin{to{transform:rotate(360deg)}}
+            @keyframes ad-panel-enter{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+            .ad-loading-spinner{width:46px;height:46px;border:4px solid #dce8f6;border-top-color:#2479d0;border-right-color:#73b1ec;border-radius:50%;animation:ad-loading-spin .85s linear infinite;margin:0 0 22px}
+            .ad-index-loading{position:fixed;inset:0;z-index:2147483500;background:#f3f6fa;display:grid;place-items:center;font:14px Arial;color:#23334b}
+            .ad-index-loading section{width:min(500px,90vw);box-sizing:border-box;background:white;border:1px solid #dce3ed;border-radius:18px;padding:32px;box-shadow:0 12px 45px #21334b12}
+            .ad-index-loading h1{font-size:23px;margin:0 0 12px}.ad-index-loading p{line-height:1.6;color:#66758b}.ad-index-loading ul{list-style:none;padding:0;line-height:2.2}
+            .ad-index-loading button{padding:11px 14px;background:#fff;border:1px solid #b5cce3;border-radius:8px;cursor:pointer;margin:4px}.ad-index-loading button:hover{background:#edf5ff}
+            .ad-index-loading.has-error .ad-loading-spinner{animation-play-state:paused;border-top-color:#b47824}
+            #${APP.id}-app.unified .workspace-panel:not([hidden]){animation:ad-panel-enter .2s ease-out}
+            #${APP.id}-app.unified button{transition:background-color .16s,border-color .16s,box-shadow .16s,transform .16s}
+            #${APP.id}-app.unified button:hover:not(:disabled){box-shadow:0 3px 9px #204b7320}
+            #${APP.id}-app.unified .workspace-tabs button:hover:not(:disabled){background:#edf4fc;transform:none;box-shadow:none;color:#1767bb}
+            #${APP.id}-app.unified .document-card,#${APP.id}-app.unified .page-card{transition:border-color .18s,box-shadow .18s}
+            #${APP.id}-app.unified .document-card:hover,#${APP.id}-app.unified .page-card:hover{border-color:#91b6dc;box-shadow:0 5px 16px #24415e14}
+            @media(prefers-reduced-motion:reduce){.ad-loading-spinner,#${APP.id}-app.unified .workspace-panel:not([hidden]){animation:none}#${APP.id}-app.unified button,#${APP.id}-app.unified .document-card,#${APP.id}-app.unified .page-card{transition:none}#${APP.id}-app.unified button:hover:not(:disabled){transform:none}}
             #${APP.id}-app.unified{font-size:14px;background:#f3f5f8}
             #${APP.id}-app.unified [hidden]{display:none!important}
             #${APP.id}-app.unified .ad-shell{display:flex;flex-direction:column;height:100%;min-height:0}
@@ -3922,7 +3997,9 @@
             @media(max-width:700px){#${APP.id}-app.unified .workspace-body{display:block}#${APP.id}-app.unified .ad-left{width:auto;border-right:0;overflow:visible;padding:12px}#${APP.id}-app.unified .workspace-panels{overflow:visible;padding:16px}#${APP.id}-app.unified .panel-heading{align-items:start;flex-direction:column}#${APP.id}-app.unified .workspace-tabs{padding:0 8px}#${APP.id}-app.unified .ad-identity{padding:12px}#${APP.id}-app.unified .ad-footer{flex-wrap:wrap}#${APP.id}-app.unified .ged-fields{flex-wrap:wrap}#${APP.id}-app.unified .reserved-area{margin:12px auto;padding:24px}}
         `;document.head.append(style);
         renderStudentLocationStatus();invalidateConsultation();
+        state.initialIndexCheckPending=true;
         selectWorkspaceTab(ehModoUpload()?'incluir':'consulta');
+        initializeStudentIndexes();
     }
 
     function selectWorkspaceTab(key) {
@@ -3934,7 +4011,7 @@
         const withSearch=key==='consulta'||key==='incluir';
         el.workspaceIdentity.hidden=!withSearch;el.workspaceSidebar.hidden=!withSearch;
         renderConsultStudentHero();
-        if(key==='incluir'&&!state.workspacePreloaded){state.workspacePreloaded=true;queueMicrotask(preloadArchiveSystem);}
+        if(key==='incluir'&&!state.workspacePreloaded&&!state.initialIndexCheckPending){state.workspacePreloaded=true;queueMicrotask(preloadArchiveSystem);}
         return true;
     }
 

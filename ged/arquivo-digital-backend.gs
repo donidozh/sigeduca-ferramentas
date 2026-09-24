@@ -1,11 +1,11 @@
 /**
- * Arquivo Digital — serviço Google Apps Script 1.4.0.
+ * Arquivo Digital — serviço Google Apps Script 1.4.1.
  * Configure API_TOKEN, ROOT_PERMANENTE, ROOT_FORMANDOS,
  * SHEET_PERMANENTE e SHEET_FORMANDOS nas Propriedades do script.
  * Não publique chaves ou configurações privadas no repositório.
  */
 const CONFIG = Object.freeze({
-  VERSION: '1.4.0',
+  VERSION: '1.4.1',
   API_TOKEN: PropertiesService.getScriptProperties().getProperty('API_TOKEN') || '',
   ROOT_FOLDERS: Object.freeze({
     PERMANENTE: PropertiesService.getScriptProperties().getProperty('ROOT_PERMANENTE') || '',
@@ -17,7 +17,7 @@ const CONFIG = Object.freeze({
   }),
   LINK_HEADER: 'PASTA DIGITAL', LINK_TEXT: '📁 Pasta Digital', MAX_BASE64_CHARS: 12 * 1024 * 1024
 });
-const BACKEND_VERSION = '1.4.0';
+const BACKEND_VERSION = '1.4.1';
 const INDEX_TTL_SECONDS = 900;
 
 function doGet() { return json_({ok:true,service:'Arquivo Digital',version:BACKEND_VERSION}); }
@@ -304,8 +304,19 @@ function registrationMatches_(ss,student){
   }
   return matches;
 }
+function archiveBoxInsertionIndex_(sheets,name){
+  const target=boxParts_(name);
+  if(!target)throw new Error('Nome de caixa inválido.');
+  const compare=(a,b)=>a.letter.localeCompare(b.letter)||a.number-b.number;
+  const boxes=sheets.map((sheet,index)=>({parts:boxParts_(sheet.getName()),index})).filter(box=>box.parts).sort((a,b)=>compare(a.parts,b.parts));
+  // Inserir depois da caixa anterior sem mover as abas que já existem.
+  const previous=boxes.filter(box=>compare(box.parts,target)<0).pop();
+  if(previous)return previous.index+1;
+  const next=boxes.find(box=>compare(box.parts,target)>0);
+  return next?next.index:sheets.length;
+}
 function createArchiveBox_(ss,root,name){
-  const sheet=ss.insertSheet(name);
+  const sheet=ss.insertSheet(name,archiveBoxInsertionIndex_(ss.getSheets(),name));
   sheet.getRange(1,1,1,5).merge().setValue('CAIXA '+name+' — '+(root==='PERMANENTE'?'ARQUIVO PERMANENTE':'FORMANDOS'));
   sheet.getRange(2,1,1,5).setValues([['Nº','Nome','Data de nascimento','Pasta Digital','Observações']]);
   sheet.getRange(1,1,2,5).setFontWeight('bold').setFontFamily('Arial').setFontColor('#ffffff').setBackground('#1f3352').setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);

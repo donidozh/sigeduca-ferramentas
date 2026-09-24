@@ -11,7 +11,7 @@ function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={ensureInitialStudentIndexes,syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -230,4 +230,20 @@ test('trocar abas preserva páginas e seleção e mantém um único painel ativo
  const pages=[{id:'page',docKey:'ged_certidao'}],person={name:'ANA'};t.state.pageModels=pages;t.state.selectedStudentMatch=person;t.state.workspacePreloaded=true;
  for(const key of Object.keys(t.el.workspaceTabs)){assert.equal(t.selectWorkspaceTab(key),true);assert.equal(Object.values(t.el.workspaceTabs).filter(x=>!x.panel.hidden).length,1);assert.equal(t.state.pageModels,pages);assert.equal(t.state.selectedStudentMatch,person);}
  t.state.processing=true;assert.equal(t.selectWorkspaceTab('consulta'),false);assert.equal(t.state.workspaceTab,'ajuda');
+});
+
+
+test('primeiro uso aguarda os dois índices e retoma apenas o que falhou',async()=>{
+ let fail=true;const calls=[];const t=fixture(p=>{calls.push(p);if(p.action==='ping')return {ok:true,capabilities:['studentIndex','studentChanges']};if(p.root==='FORMANDOS'&&fail)return {ok:false,error:'offline'};return {ok:true,version:'v',epoch:'v',results:[{name:p.root}],nextOffset:null,total:1,createdAt:Date.now(),expiresAt:Date.now()+900000};});
+ const progress=[];await assert.rejects(t.ensureInitialStudentIndexes((r,n,ready)=>progress.push([r,ready])),/offline/);
+ const key=await t.searchCacheKey();assert.ok(t.values.get(key+':index:PERMANENTE'));assert.equal(t.values.get(key+':index:FORMANDOS'),undefined);
+ fail=false;await t.ensureInitialStudentIndexes();assert.ok(t.values.get(key+':index:FORMANDOS'));assert.equal(calls.filter(p=>p.root==='PERMANENTE').length,1);
+ const before=calls.length;await t.ensureInitialStudentIndexes();assert.equal(calls.length,before);
+});
+
+test('índices completos abrem sem conexão e falta de configuração não libera primeiro uso',async()=>{
+ const t=fixture(()=>{throw Error('não deve consultar rede');});const key=await t.searchCacheKey();
+ for(const root of ['PERMANENTE','FORMANDOS'])t.values.set(key+':index:'+root,{records:[],createdAt:1});
+ await t.ensureInitialStudentIndexes();assert.equal(t.calls(),0);
+ t.values.set('adig01:driveToken','');await assert.rejects(t.ensureInitialStudentIndexes(),/Configure a conexão/);
 });

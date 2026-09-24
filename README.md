@@ -44,7 +44,7 @@ O Arquivo Digital tem uma única entrada no menu e cinco abas: Consultar Pasta, 
 
 ## Termos de Compromisso
 
-Consulte também as [novidades e orientações do Arquivo Digital 0.14.0](ged/arquivo-digital.md): cadastro em caixas, seleção obrigatória antes do envio, duplicação de páginas, lista única e identificação local de documentos.
+Consulte também as [novidades e orientações do Arquivo Digital 0.14.1](ged/arquivo-digital.md): cadastro em caixas, seleção obrigatória antes do envio, duplicação de páginas, lista única e identificação local de documentos.
 
 Disponível em **Ferramentas → Adicionar ferramentas → Termos de Compromisso**. Usa a mesma página-base de Requerimentos, preservando o campo de código e a lupa nativa do aluno, com uma página separada para emissão de termos.
 

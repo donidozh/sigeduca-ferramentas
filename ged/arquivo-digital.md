@@ -1,4 +1,4 @@
-# Arquivo Digital 0.14.0
+# Arquivo Digital 0.14.1
 
 Uma única entrada **Arquivo Digital** reúne as abas **Consultar Pasta**, **Incluir Pasta**, **Documentos Internos**, **Configurações** e **Ajuda**. Consulta e inclusão compartilham a busca e a pasta selecionada. Alternar abas mantém as páginas e classificações. Os atalhos antigos continuam compatíveis.
 
@@ -81,3 +81,11 @@ Atualize a implantação existente como Web App, mantendo o endereço e as permi
 Execute `node arquivo-digital.test.cjs`, `node arquivo-digital-backend.test.cjs`, `node verificar-atualizacoes.test.cjs` e `node termos-compromisso.test.cjs`.
 
 Os testes do backend simulam Sheets/Drive e verificam concorrência, retomada, identidade e repetição de arquivos. A integração final precisa de validação na implantação Google e no SIGEDUCA reais. O OCR usa o Tesseract já configurado pelo script; resultados de documentos escaneados dependem da qualidade das imagens.
+
+## Posição das novas caixas — serviço 1.4.1
+
+Uma nova caixa é inserida após a anterior na ordem de letra e número: A6 após A5, J9 após J8 e A11 após A10. Se a letra ainda não tiver caixas, a aba entra na posição alfabética correspondente. As abas existentes mantêm sua ordem. A correção é no Apps Script e não exige atualizar o userscript.
+
+## Primeiro carregamento e efeitos visuais — 0.14.1
+
+No primeiro uso de cada computador/configuração, a tela permanece bloqueada até concluir os índices de Permanente e Formandos. A tela mostra um indicador circular e a contagem de nomes por arquivo. Se ocorrer uma falha, permite configurar a conexão ou tentar novamente, aproveitando o índice que já terminou; não há botão para ignorar essa etapa. Com os dois índices salvos, as próximas aberturas usam o cache imediatamente. A interface tem hover e transições suaves entre abas, respeitando a preferência de movimento reduzido do sistema.
