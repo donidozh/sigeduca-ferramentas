@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Menu Lateral de Ferramentas (Base)
 // @namespace    http://tampermonkey.net/
-// @version      2.6.0
+// @version      2.7.0
 // @description  Menu lateral independente para centralizar os userscripts instalados no SIGEDUCA.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/
@@ -22,7 +22,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.6.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.7.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js'
     });
@@ -115,6 +115,12 @@
     // Se um módulo for desativado no Tampermonkey, ele desaparece
     // naturalmente após a próxima navegação/recarregamento.
     const ferramentas = new Map();
+    const CATALOGO_URL = 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/catalogo.json';
+    let catalogo = [];
+    let catalogoEstado = 'inicial';
+    let catalogoAberto = false;
+    let catalogoUltimaConsulta = 0;
+    let catalogoPedido = null;
 
     let host = null;
     let shadow = null;
@@ -327,7 +333,7 @@
     }
 
     function requisitarTexto(url) {
-        url = validarURLAtualizacao(url);
+        url = url === CATALOGO_URL ? url : validarURLAtualizacao(url);
         return new Promise((resolve, reject) => {
             if (!url) {
                 reject(new Error('URL de atualização não informada.'));
@@ -438,15 +444,111 @@
     }
 
     function abrirInstalador() {
-        if (!CONFIG.instaladorUrl) {
-            mostrarAviso(
-                'O instalador ainda não foi configurado. Quando criarmos o GitHub Pages, a URL será colocada aqui.',
-                'info'
-            );
-            return;
-        }
+        catalogoAberto = !catalogoAberto;
+        agendarRenderizacao();
+        if (catalogoAberto) carregarCatalogo(true);
+    }
 
-        window.open(CONFIG.instaladorUrl, '_blank', 'noopener,noreferrer');
+    function validarCatalogo(dados) {
+        if (dados?.formato !== 1 || !Array.isArray(dados.ferramentas) || dados.ferramentas.length > 100) {
+            throw new Error('Formato de catálogo inválido.');
+        }
+        const ids = new Set();
+        return dados.ferramentas.map(item => {
+            if (!item || typeof item.id !== 'string' || !/^[a-z0-9-]{1,80}$/.test(item.id) || ids.has(item.id) ||
+                typeof item.titulo !== 'string' || !item.titulo.trim() || item.titulo.length > 120 ||
+                typeof item.descricao !== 'string' || item.descricao.length > 500 ||
+                typeof item.arquivo !== 'string' || !/^[a-z0-9-]+\.user\.js$/.test(item.arquivo) ||
+                !Array.isArray(item.registros) || item.registros.length > 20 ||
+                item.registros.some(id => typeof id !== 'string' || !/^[a-z0-9-]{1,80}$/.test(id))) {
+                throw new Error('Ferramenta inválida no catálogo.');
+            }
+            ids.add(item.id);
+            const installUrl = new URL(item.arquivo, CATALOGO_URL).href;
+            if (!validarURLAtualizacao(installUrl)) throw new Error('Endereço de instalação inválido.');
+            return { id: item.id, titulo: item.titulo.trim(), descricao: item.descricao,
+                registros: [...item.registros], installUrl };
+        });
+    }
+
+    async function carregarCatalogo(forcar = false) {
+        if (catalogoPedido) return catalogoPedido;
+        if (!forcar && catalogoUltimaConsulta && Date.now() - catalogoUltimaConsulta < CONFIG.intervaloVerificacaoMs) return;
+        catalogoEstado = 'carregando';
+        agendarRenderizacao();
+        catalogoPedido = (async () => {
+            try {
+                const texto = await requisitarTexto(CATALOGO_URL);
+                if (texto.length > 200000) throw new Error('Catálogo grande demais.');
+                catalogo = validarCatalogo(JSON.parse(texto));
+                catalogoUltimaConsulta = Date.now();
+                catalogoEstado = 'pronto';
+            } catch (_) {
+                // Mantém o último catálogo válido apenas na página atual.
+                catalogoEstado = 'erro';
+            } finally {
+                catalogoPedido = null;
+                agendarRenderizacao();
+            }
+        })();
+        return catalogoPedido;
+    }
+
+    function ferramentaDetectada(item) {
+        return item.registros.some(id => ferramentas.has(id));
+    }
+
+    function renderizarCatalogo() {
+        const disponiveis = catalogo.filter(item => !ferramentaDetectada(item));
+        if (refs.instalar) {
+            refs.instalar.textContent = catalogoAberto ? 'Voltar às ferramentas' :
+                'Adicionar ferramentas' + (catalogoEstado === 'pronto' ? ' (' + disponiveis.length + ')' : '');
+            refs.instalar.setAttribute('aria-expanded', String(catalogoAberto || !ferramentas.size));
+        }
+        if (!catalogoAberto && ferramentas.size) return;
+        const secao = criarElemento('section', 'sig-grupo');
+        secao.appendChild(criarElemento('h3', 'sig-grupo-titulo', 'Central de ferramentas'));
+        const ajuda = criarElemento('p', 'sig-catalogo-ajuda',
+            'Escolha uma ferramenta, confirme no Tampermonkey e recarregue o SigEduca. As novidades aparecem aqui automaticamente.');
+        secao.appendChild(ajuda);
+        if (catalogoEstado === 'inicial' || catalogoEstado === 'carregando') {
+            secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda', 'Buscando ferramentas…'));
+        }
+        if (catalogoEstado === 'erro') {
+            secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda',
+                'Não foi possível consultar as novidades.' + (catalogo.length ? ' Exibindo a última lista carregada nesta página.' : '')));
+            const tentar = criarElemento('button', 'sig-catalogo-instalar', 'Tentar novamente');
+            tentar.type = 'button';
+            tentar.addEventListener('click', () => carregarCatalogo(true));
+            secao.appendChild(tentar);
+        }
+        for (const item of catalogo) {
+            const card = criarElemento('div', 'sig-catalogo-card');
+            card.appendChild(criarElemento('strong', '', item.titulo));
+            card.appendChild(criarElemento('p', 'sig-catalogo-ajuda', item.descricao));
+            const detectada = ferramentaDetectada(item);
+            if (detectada) {
+                card.appendChild(criarElemento('span', 'sig-catalogo-status', 'Ativa nesta página'));
+            } else {
+                const instalar = criarElemento('button', 'sig-catalogo-instalar',
+                    item.registros.length ? 'Instalar' : 'Instalar / reinstalar');
+                instalar.type = 'button';
+                instalar.addEventListener('click', () => {
+                    abrirAtualizacao(item);
+                    mostrarAviso('Confirme a instalação no Tampermonkey e depois recarregue o SigEduca.');
+                });
+                card.appendChild(instalar);
+                if (!item.registros.length) card.appendChild(criarElemento('p', 'sig-catalogo-ajuda',
+                    'Funciona em uma tela específica; o menu não consegue confirmar se já está instalada.'));
+            }
+            secao.appendChild(card);
+        }
+        if (catalogoEstado === 'pronto' && !catalogo.length) {
+            secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda', 'Nenhuma ferramenta publicada no catálogo ainda.'));
+        }
+        secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda',
+            'Uma ferramenta desativada também pode aparecer como disponível. Confira o Tampermonkey antes de reinstalar.'));
+        refs.conteudo.appendChild(secao);
     }
 
     function abrirAtualizacao(item) {
@@ -679,6 +781,11 @@
 
         const style = document.createElement('style');
         style.textContent = `
+            .sig-catalogo-card { margin: 10px 0; padding: 12px; border: 1px solid #d8e0eb; border-radius: 10px; background: #fff; color: #203047; font-size: 13px; }
+            .sig-catalogo-ajuda { margin: 8px 0; font-size: 12px; line-height: 1.5; color: #526178; }
+            .sig-catalogo-instalar { border: 0; border-radius: 7px; background: #1958b7; color: white; padding: 8px 12px; font: inherit; cursor: pointer; }
+            .sig-catalogo-instalar:focus-visible { outline: 3px solid #85baff; outline-offset: 2px; }
+            .sig-catalogo-status { color: #176642; font-size: 12px; font-weight: 600; }
             :host {
                 all: initial;
             }
@@ -1310,10 +1417,11 @@
                     <button
                         class="sig-instalar"
                         type="button"
-                        title="Abrir central de instalação das ferramentas"
+                        title="Adicionar ferramentas sem sair do SigEduca"
+                        aria-expanded="false"
                     >
                         <span aria-hidden="true">↓</span>
-                        <span>Instalar ferramentas</span>
+                        <span>Adicionar ferramentas</span>
                     </button>
 
                     <button
@@ -1399,6 +1507,7 @@
 
         refs.verificar.addEventListener('click', () => {
             verificarAtualizacoes(true);
+            carregarCatalogo(true);
         });
 
         if (CONFIG.fecharAoClicarFora) {
@@ -1447,6 +1556,7 @@
 
         if (painelAberto) {
             solicitarRegistros();
+            carregarCatalogo(false);
 
             // Dá alguns milissegundos para os módulos responderem ao evento
             // de solicitação antes de checar as versões.
@@ -1628,12 +1738,14 @@
 
         atualizarContadorCabecalho();
 
+        renderizarCatalogo();
+        if (catalogoAberto) return;
+
         if (!total) {
             const vazio = criarElemento(
                 'div',
                 'sig-vazio',
-                'Nenhum módulo registrou ferramentas nesta página. ' +
-                'Os scripts ativos aparecerão aqui automaticamente.'
+                'Suas ferramentas ativas aparecerão aqui depois da instalação e do recarregamento da página.'
             );
 
             refs.conteudo.appendChild(vazio);

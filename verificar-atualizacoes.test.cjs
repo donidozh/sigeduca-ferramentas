@@ -4,6 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/';
+class Elemento {
+  constructor(tag) { this.tag = tag; this.children = []; this.events = {}; this.textContent = ''; }
+  appendChild(child) { this.children.push(child); }
+  addEventListener(event, fn) { this.events[event] = fn; }
+  setAttribute() {}
+}
 function menu(respond) {
   let s = fs.readFileSync(path.join(__dirname, 'menu-ferramentas.user.js'), 'utf8');
   s = s.replace('    // Cria o painel assim que o <html> existir.', `
@@ -11,13 +17,16 @@ function menu(respond) {
              contador: {}, atualizarBase: {} };
     globalThis.testing = { compararVersoes, validarURLAtualizacao, verificarAtualizacoes,
         verificarAtualizacaoDaFerramenta, abrirAtualizacao, statusAtualizacoes,
-        ferramentas, refs, ATUALIZACAO_BASE };
+        ferramentas, refs, ATUALIZACAO_BASE, validarCatalogo, carregarCatalogo,
+        ferramentaDetectada, renderizarCatalogo,
+        estadoCatalogo: () => ({ estado: catalogoEstado, itens: catalogo }) };
     return;
     // Cria o painel assim que o <html> existir.`);
   const opened = [];
   const window = { addEventListener() {}, open: (...args) => opened.push(args) };
   window.top = window.self = window;
   const context = { window, URL, console: { debug() {} }, setTimeout() {}, clearTimeout() {},
+    document: { createElement: tag => new Elemento(tag) },
     requestAnimationFrame() {}, GM_info: { script: { version: '2.6.0' } },
     GM_xmlhttpRequest: respond };
   vm.runInNewContext(s, context);
@@ -98,4 +107,72 @@ test('não consulta nem abre endereços fora do repositório autorizado', async 
   }
   assert.equal(requested, false);
   assert.equal(m.opened.length, 0);
+});
+
+const catalogoPublicado = JSON.parse(fs.readFileSync(path.join(__dirname, 'catalogo.json'), 'utf8'));
+test('catálogo cobre todas as ferramentas, com arquivos existentes e instalação restrita ao repositório', () => {
+  const m = menu(() => {});
+  const itens = m.validarCatalogo(catalogoPublicado);
+  assert.equal(itens.length, 11);
+  for (const item of itens) {
+    assert.ok(item.installUrl.startsWith(root));
+    assert.ok(fs.existsSync(path.join(__dirname, new URL(item.installUrl).pathname.split('/').pop())));
+  }
+  assert.equal(new Set(itens.map(item => item.installUrl)).size, 11);
+});
+test('catálogo rejeita URL externa, travessia de pasta, formato inválido e IDs duplicados', () => {
+  const m = menu(() => {});
+  for (const arquivo of ['https://example.com/a.user.js', '../a.user.js', 'a.js', 'a.user.js?x=1']) {
+    assert.throws(() => m.validarCatalogo({ formato: 1, ferramentas: [{ ...catalogoPublicado.ferramentas[0], arquivo }] }));
+  }
+  assert.throws(() => m.validarCatalogo({ formato: 2, ferramentas: [] }));
+  assert.throws(() => m.validarCatalogo({ formato: 1, ferramentas: [catalogoPublicado.ferramentas[0], catalogoPublicado.ferramentas[0]] }));
+});
+test('novidade aparece pela atualização do catálogo sem modificar o menu; clique não marca instalação', async () => {
+  let resposta = structuredClone(catalogoPublicado);
+  let chamadas = 0;
+  const m = menu(o => { chamadas++; o.onload({ status: 200, responseText: JSON.stringify(resposta) }); });
+  await m.carregarCatalogo();
+  assert.equal(m.estadoCatalogo().itens.length, 11);
+  await m.carregarCatalogo();
+  assert.equal(chamadas, 1);
+  resposta.ferramentas.push({ id: 'nova', titulo: 'Nova ferramenta', descricao: 'Teste', arquivo: 'nova.user.js', registros: ['nova'] });
+  await m.carregarCatalogo(true);
+  const item = m.estadoCatalogo().itens.at(-1);
+  assert.equal(item.id, 'nova');
+  assert.equal(m.ferramentaDetectada(item), false);
+  m.abrirAtualizacao(item);
+  assert.equal(m.opened[0][0], root + 'nova.user.js');
+  assert.equal(m.ferramentaDetectada(item), false);
+  m.ferramentas.set('nova', { id: 'nova' });
+  assert.equal(m.ferramentaDetectada(item), true);
+});
+test('falha de catálogo mantém ferramentas instaladas e permite tentar novamente', async () => {
+  let falha = false;
+  const m = menu(o => falha ? o.onerror() : o.onload({ status: 200, responseText: JSON.stringify(catalogoPublicado) }));
+  m.ferramentas.set('requerimentos', { id: 'requerimentos' });
+  await m.carregarCatalogo();
+  falha = true;
+  await m.carregarCatalogo(true);
+  assert.equal(m.estadoCatalogo().estado, 'erro');
+  assert.equal(m.estadoCatalogo().itens.length, 11);
+  assert.ok(m.ferramentas.has('requerimentos'));
+  falha = false;
+  await m.carregarCatalogo(true);
+  assert.equal(m.estadoCatalogo().estado, 'pronto');
+});
+test('primeira instalação exibe a central e botões que abrem o script correto', async () => {
+  const m = menu(o => o.onload({ status: 200, responseText: JSON.stringify(catalogoPublicado) }));
+  await m.carregarCatalogo();
+  m.refs.conteudo = new Elemento('main');
+  m.renderizarCatalogo();
+  const todos = [];
+  function percorrer(el) { todos.push(el); el.children.forEach(percorrer); }
+  percorrer(m.refs.conteudo);
+  assert.ok(todos.some(el => el.textContent === 'Central de ferramentas'));
+  const botoes = todos.filter(el => el.tag === 'button');
+  assert.equal(botoes.length, 11);
+  botoes[0].events.click();
+  assert.equal(m.opened[0][0], root + 'requerimentos.user.js');
+  assert.equal(m.ferramentas.size, 0);
 });
