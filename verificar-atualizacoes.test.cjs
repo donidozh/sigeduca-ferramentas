@@ -34,7 +34,7 @@ function menu(respond) {
 }
 test('todos os scripts mantêm identidade e URLs instaláveis', () => {
   const files = fs.readdirSync(__dirname).filter(f => f.endsWith('.user.js'));
-  assert.equal(files.length, 12);
+  assert.equal(files.length, 13);
   const identities = new Set();
   for (const file of files) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
@@ -47,7 +47,7 @@ test('todos os scripts mantêm identidade e URLs instaláveis', () => {
     assert.ok(!identities.has(identity));
     identities.add(identity);
     if (file !== 'menu-ferramentas.user.js' && text.includes("'sigeduca:ferramentas:registrar'")) {
-      assert.match(text, /detail: \{ \.\.\.\w+, \.\.\.ATUALIZACAO_SCRIPT \}/);
+      assert.match(text, /detail:\s*\{\s*\.\.\.\w+,\s*\.\.\.ATUALIZACAO_SCRIPT\s*\}/);
     }
     assert.doesNotMatch(text, /https:\/\/script\.google\.com\/macros\/s\/[\w-]+/);
     assert.doesNotMatch(text, /https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]+/);
@@ -113,12 +113,12 @@ const catalogoPublicado = JSON.parse(fs.readFileSync(path.join(__dirname, 'catal
 test('catálogo cobre todas as ferramentas, com arquivos existentes e instalação restrita ao repositório', () => {
   const m = menu(() => {});
   const itens = m.validarCatalogo(catalogoPublicado);
-  assert.equal(itens.length, 11);
+  assert.equal(itens.length, 12);
   for (const item of itens) {
     assert.ok(item.installUrl.startsWith(root));
     assert.ok(fs.existsSync(path.join(__dirname, new URL(item.installUrl).pathname.split('/').pop())));
   }
-  assert.equal(new Set(itens.map(item => item.installUrl)).size, 11);
+  assert.equal(new Set(itens.map(item => item.installUrl)).size, 12);
 });
 test('catálogo rejeita URL externa, travessia de pasta, formato inválido e IDs duplicados', () => {
   const m = menu(() => {});
@@ -133,7 +133,7 @@ test('novidade aparece pela atualização do catálogo sem modificar o menu; cli
   let chamadas = 0;
   const m = menu(o => { chamadas++; o.onload({ status: 200, responseText: JSON.stringify(resposta) }); });
   await m.carregarCatalogo();
-  assert.equal(m.estadoCatalogo().itens.length, 11);
+  assert.equal(m.estadoCatalogo().itens.length, 12);
   await m.carregarCatalogo();
   assert.equal(chamadas, 1);
   resposta.ferramentas.push({ id: 'nova', titulo: 'Nova ferramenta', descricao: 'Teste', arquivo: 'nova.user.js', registros: ['nova'] });
@@ -155,7 +155,7 @@ test('falha de catálogo mantém ferramentas instaladas e permite tentar novamen
   falha = true;
   await m.carregarCatalogo(true);
   assert.equal(m.estadoCatalogo().estado, 'erro');
-  assert.equal(m.estadoCatalogo().itens.length, 11);
+  assert.equal(m.estadoCatalogo().itens.length, 12);
   assert.ok(m.ferramentas.has('requerimentos'));
   falha = false;
   await m.carregarCatalogo(true);
@@ -171,8 +171,8 @@ test('primeira instalação exibe a central e botões que abrem o script correto
   percorrer(m.refs.conteudo);
   assert.ok(todos.some(el => el.textContent === 'Central de ferramentas'));
   const botoes = todos.filter(el => el.tag === 'button');
-  assert.equal(botoes.length, 11);
+  assert.equal(botoes.length, 12);
   botoes[0].events.click();
-  assert.equal(m.opened[0][0], root + 'requerimentos.user.js');
+  assert.equal(m.opened[0][0], root + 'termos-compromisso.user.js');
   assert.equal(m.ferramentas.size, 0);
 });

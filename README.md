@@ -17,6 +17,7 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Ferramenta | Instalação | Onde aparece |
 | --- | --- | --- |
 | Menu Lateral de Ferramentas (Base) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js) | Menu Ferramentas |
+| Termos de Compromisso | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/termos-compromisso.user.js) | Menu Ferramentas |
 | Requerimentos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/requerimentos.user.js) | Menu Ferramentas |
 | Extrator de Matrículas | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/extrator-matriculas.user.js) | Menu Ferramentas |
 | Analisador de Dependências Integrado | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/analisador-dependencias.user.js) | Menu Ferramentas |
@@ -30,6 +31,22 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Exportar notas fiscais para CSV | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/notas-fiscais-csv.user.js) | Tela específica |
 
 O Arquivo Digital registra duas entradas no menu (consulta e upload), mas é um único script. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
+
+## Termos de Compromisso
+
+Disponível em **Ferramentas → Adicionar ferramentas → Termos de Compromisso**. Usa a mesma página-base de Requerimentos, preservando o campo de código e a lupa nativa do aluno, com uma página separada para emissão de termos.
+
+1. Selecione o aluno pela lupa ou informe o código. Aguarde a consulta automática ou use **Carregar dados**.
+2. Confira os dados do aluno, responsável e matrícula. Dados ausentes podem ser completados na tela, sem alterar o cadastro do SigEduca.
+3. Escolha o tipo de termo. **Uso de imagem e voz** seleciona automaticamente o modelo de menor ou maior de idade pela idade completa na data de emissão. Nascimento ausente, inválido ou futuro impede essa emissão até ser corrigido.
+4. Em **Entrega de documentos pendentes**, marque os documentos faltantes, informe o prazo e quem assume o compromisso. A impressão mantém os 12 itens do modelo fornecido e marca com X apenas os selecionados.
+5. Clique em **Visualizar e imprimir**, confira o documento e use **Imprimir / Salvar em PDF**. Na impressão A4, desative cabeçalhos e rodapés do navegador e mantenha escala de 100%.
+
+Também inclui ciência do tratamento de dados pessoais, compromisso familiar para menor (ano letivo subsequente, conforme o script fornecido) e autorização de matrícula/retirada de documentos. O termo militar foi removido. Dados complementares da escola podem ser preenchidos na seção correspondente. O texto e as referências do termo de documentos seguem o modelo de 2026 da Escola Estadual Onze de Março enviado para esta adaptação; os campos de escola, ano, matrícula e datas são preenchidos na emissão.
+
+As imagens ficam no próprio script, sem depender de carregamento externo durante a impressão. Dados dos alunos permanecem na página e nas consultas ao próprio SigEduca; não são publicados no GitHub nem gravados pelo script. Se o antigo script **SIGEDUCA - Emissão de Termos** estiver ativo, desative-o para evitar o painel antigo junto da nova central.
+
+Testes do módulo: `node termos-compromisso.test.cjs`. Interface e documentos foram conferidos com dados fictícios; a consulta em sessão real do SigEduca precisa de validação no ambiente da escola.
 
 ## Atualizações
 

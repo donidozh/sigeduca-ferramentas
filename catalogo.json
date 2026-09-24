@@ -1,6 +1,7 @@
 {
   "formato": 1,
   "ferramentas": [
+    { "id": "termos-compromisso", "titulo": "Termos de Compromisso", "descricao": "Termos escolares, imagem com seleção por idade e compromisso de entrega de documentos pendentes.", "arquivo": "termos-compromisso.user.js", "registros": ["termos-compromisso"] },
     { "id": "requerimentos", "titulo": "Requerimentos", "descricao": "Central de requerimentos de alunos.", "arquivo": "requerimentos.user.js", "registros": ["requerimentos"] },
     { "id": "extrator-matriculas", "titulo": "Extrator de Matrículas", "descricao": "Consulta e extrai dados de matrículas em lote.", "arquivo": "extrator-matriculas.user.js", "registros": ["extrator-matriculas"] },
     { "id": "analisador-dependencias", "titulo": "Analisador de Dependências", "descricao": "Analisa históricos e identifica dependências a pagar.", "arquivo": "analisador-dependencias.user.js", "registros": ["dependencias"] },
