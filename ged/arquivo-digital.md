@@ -1,4 +1,4 @@
-# Arquivo Digital 0.12.0
+# Arquivo Digital 0.13.0
 
 O sistema exige um aluno selecionado da planilha antes de enviar ao Drive ou ao GED. Se ainda não existir, use **Cadastrar aluno**: informe nome e nascimento, escolha uma caixa da inicial do nome ou **Abrir nova caixa**. Todas as caixas ficam disponíveis; o técnico escolhe conforme o espaço físico. O serviço confere duplicidade, insere o cadastro e prepara a pasta digital com seu vínculo. Se a preparação da pasta falhar, o cadastro é preservado e uma nova tentativa conclui o vínculo.
 
@@ -20,11 +20,15 @@ O script reúne consulta de alunos e organização de documentos. Instale ou atu
 
 ## Busca rápida
 
-Consultas repetidas ficam em cache por 15 minutos, separadas por serviço, chave, arquivo, nome e nascimento. Opções de busca → Atualizar busca ignora o cache e solicita uma nova leitura ao serviço. Limpar cache remove os resultados e índices locais da configuração atual.
+A versão 0.13.0 mantém o índice de nomes neste navegador entre recarregamentos. A tela de carregamento espera somente PDF e OCR; a busca de nomes se prepara em segundo plano. Quando já existe um índice, as consultas usam os dados locais imediatamente, inclusive durante atualização ou falha de conexão. Antes de enviar, o serviço continua conferindo a identidade e a posição atual do aluno na planilha.
 
-Com o backend 1.2.0, a sincronização baixa um índice de PERMANENTE ou FORMANDOS, também disponível em Opções de busca → Sincronizar nomes. Durante a validade do índice (15 minutos desde a leitura no servidor), novos nomes são pesquisados localmente. Índices incompletos não são ativados. Quando expiram, são renovados na próxima consulta. A primeira leitura de uma planilha grande ainda pode levar tempo e é feita em blocos de 20 abas.
+Cadastrar um aluno acrescenta ou atualiza somente esse registro no cache. Com o backend 1.4.0, cada computador confere alterações do serviço a cada dois minutos enquanto a tela está aberta e o usuário não está processando documentos. Sem novidades, a resposta não lê planilhas. Com novidades, baixa as caixas alteradas e preserva as demais. A atualização não substitui a seleção que o técnico está usando.
 
-Durante a consulta ou sincronização, a seleção de arquivo fica bloqueada. Ao trocar de arquivo depois da conclusão, a seleção anterior do aluno é descartada. Digite apenas os números do nascimento: `25032010` vira `25/03/2010`. Datas impossíveis, futuras ou incompletas são recusadas.
+Edições feitas diretamente no Google Sheets entram em uma conferência completa após uma hora desde a última leitura completa, em segundo plano. Para antecipar, use **Opções de busca → Atualizar busca** ou **Atualizar índice completo**. A primeira sincronização, um histórico de alterações perdido, muitas caixas alteradas ou a limpeza do cache ainda exigem uma leitura completa. O índice antigo permanece disponível até o novo terminar, e dados parciais não substituem o cache. O primeiro uso sem índice precisa aguardar essa leitura para pesquisar localmente.
+
+Consultas avulsas, usadas quando o serviço não oferece índice, continuam em cache por 15 minutos. **Limpar cache** apaga os índices e consultas locais da configuração atual. Serviço e chave de acesso diferentes usam caches separados.
+
+Durante a consulta ou sincronização manual, a seleção de arquivo fica bloqueada. Ao trocar de arquivo depois da conclusão, a seleção anterior do aluno é descartada. Digite apenas os números do nascimento: `25032010` vira `25/03/2010`. Datas impossíveis, futuras ou incompletas são recusadas.
 
 ## Carregamento e OCR
 
@@ -40,7 +44,7 @@ O servidor lê intervalos inteiros, mantém um índice compartilhado comprimido 
 
 ## Backend Google Apps Script
 
-O arquivo `arquivo-digital-backend.gs` contém o serviço 1.3.0, necessário para cadastro e verificação do aluno selecionado. A publicação no GitHub não atualiza automaticamente uma implantação do Apps Script. Nesta atualização, mantenha o endereço da implantação existente e publique uma nova versão do serviço.
+O arquivo `arquivo-digital-backend.gs` contém o serviço 1.4.0, necessário para cadastro e verificação do aluno selecionado. A publicação no GitHub não atualiza automaticamente uma implantação do Apps Script. Nesta atualização, mantenha o endereço da implantação existente e publique uma nova versão do serviço.
 
 Na instalação nova, configure nas **Propriedades do script**:
 
@@ -54,7 +58,7 @@ Na instalação nova, configure nas **Propriedades do script**:
 
 Na migração de um projeto existente, preserve os IDs e a chave da configuração privada. O serviço aceita o bloco CONFIG anterior durante a migração; o restante deve ser substituído integralmente para evitar funções duplicadas. Não copie configurações privadas para o GitHub.
 
-Atualize a implantação existente como Web App, mantendo o endereço e as permissões já utilizadas. Teste a ação `ping`: a resposta deve indicar versão `1.3.0` e capacidades `studentIndex`, `idempotentUpload`, `parallelFolders` e `studentRegistration`.
+Atualize a implantação existente como Web App, mantendo o endereço e as permissões já utilizadas. Teste a ação `ping`: a resposta deve indicar versão `1.4.0` e capacidades `studentIndex`, `idempotentUpload`, `parallelFolders` `studentRegistration` e `studentChanges`.
 
 ## Trabalho simultâneo
 

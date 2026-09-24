@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.12.0
+// @version      0.13.0
 // @description  Arquivo Digital modular com Consulta e Upload; pesquisa de alunos diretamente no Google Sheets, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.12.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.13.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.12.0'
+            versao: '0.13.0'
         },
         {
             id: 'arquivo-digital-upload',
@@ -65,7 +65,7 @@
             ordem: 31,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.12.0'
+            versao: '0.13.0'
         }
     ]);
 
@@ -88,7 +88,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.12.0',
+        version: '0.13.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -3560,6 +3560,12 @@
 
     const SEARCH_CACHE_TTL = 15 * 60 * 1000;
     const searchInFlight = new Map();
+    const indexInFlight=new Map(),indexAttempts=new Map();
+    const indexGeneration=id=>GM_getValue(id+':generation','0');
+    const bumpIndexGeneration=id=>GM_setValue(id+':generation',createRequestId());
+    const INDEX_CHECK_MS=2*60*1000,INDEX_RECONCILE_MS=60*60*1000;
+    const usableIndex=index=>Boolean(index&&Array.isArray(index.records)&&Number.isFinite(index.createdAt));
+
 
     async function searchCacheKey() {
         const scope = `${GM_getValue(APP.driveEndpointKey, '')}\n${GM_getValue(APP.driveTokenKey, '')}`;
@@ -3568,23 +3574,24 @@
 
     async function clearSearchCache() {
         const key=await searchCacheKey();
+        for(const root of ['PERMANENTE','FORMANDOS']){const id=key+':index:'+root;bumpIndexGeneration(id);indexAttempts.delete(id);}
         GM_setValue(key, []); GM_setValue(key+':index:PERMANENTE',null); GM_setValue(key+':index:FORMANDOS',null);
     }
 
     async function cachedStudentSearch(payload, forceRefresh = false) {
-        if(state.backendReady)await state.backendReady;
         const storeKey = await searchCacheKey();
         let index=GM_getValue(storeKey+':index:'+payload.root,null);
-        if(state.indexSupported&&(forceRefresh||!index||index.expiresAt<=Date.now())){
-            index=await downloadStudentIndex(payload.root,forceRefresh);
-            forceRefresh=false;
+        if(forceRefresh||!usableIndex(index)){
+            if(state.backendReady)await state.backendReady;
+            if(state.indexSupported){index=await refreshStudentIndex(payload.root,forceRefresh);forceRefresh=false;}
         }
-        if (!forceRefresh && index && index.expiresAt>Date.now() && Array.isArray(index.records)) {
+        if (!forceRefresh && usableIndex(index)) {
+            queueIndexRefresh(payload.root);
             const query=normalizeText(payload.query);
             const terms=query.split(/\s+/).filter(t=>t.length>=3&&!/^(DAS|DOS|DEL|DELLA)$/.test(t));
             const single=query.split(/\s+/).length===1;
             const results=index.records.filter(r=>single?normalizeText(r.name).includes(query):terms.some(t=>normalizeText(r.name).includes(t)));
-            if(el.cacheStatus)el.cacheStatus.textContent='Índice local · '+new Date(index.createdAt).toLocaleTimeString('pt-BR');
+            if(el.cacheStatus)el.cacheStatus.textContent='Busca local · última atualização '+new Date(index.checkedAt||index.createdAt).toLocaleString('pt-BR');
             return {responseText:JSON.stringify({ok:true,results}),fromCache:true};
         }
         const queryKey = JSON.stringify([payload.root, normalizeText(payload.query), payload.birth || '', payload.maxResults]);
@@ -3618,20 +3625,26 @@
     function installSearchCacheControls() {
         installBirthMask();
         state.backendReady=prepareSearchBackend();
+        if(state.indexTimer)clearInterval(state.indexTimer);
+        state.indexTimer=setInterval(()=>{
+            if(!el.app?.isConnected){clearInterval(state.indexTimer);state.indexTimer=null;return;}
+            if(!state.processing)queueIndexRefresh(el.archiveRoot.value);
+        },INDEX_CHECK_MS);
         el.archiveRoot.addEventListener('change',()=>{
             state.selectedStudentMatch=null;state.lastSearchResults=[];state.searchSequence=(state.searchSequence||0)+1;
             if(el.studentCode)el.studentCode.value='';
             if(el.matchModal)el.matchModal.style.display='none';
             if(el.cacheStatus)el.cacheStatus.textContent='Consultando '+el.archiveRoot.value+'.';
+            queueIndexRefresh(el.archiveRoot.value);
         });
         const container = el.searchStudentBtn.parentElement;
         const refresh = document.createElement('button'); refresh.type='button';refresh.textContent='Atualizar busca';refresh.title='Consultar novamente o Google Sheets, sem usar o resultado salvo';
         refresh.onclick=()=>{if(!state.processing&&!el.searchStudentBtn.disabled)searchStudentInLists(true);};
         const clear=document.createElement('button');clear.type='button';clear.textContent='Limpar cache';clear.title='Apagar as consultas guardadas neste navegador';
         clear.onclick=()=>clearSearchCache().then(()=>el.cacheStatus.textContent='Cache removido.').catch(error=>showError(error));
-        el.cacheStatus=document.createElement('small');el.cacheStatus.setAttribute('role','status');el.cacheStatus.style.display='block';el.cacheStatus.textContent='Consultas guardadas por 15 minutos.';
+        el.cacheStatus=document.createElement('small');el.cacheStatus.setAttribute('role','status');el.cacheStatus.style.display='block';el.cacheStatus.textContent='Busca local · atualização automática em segundo plano.';
         const options=document.createElement('details');options.className='search-options';options.innerHTML='<summary>Opções de busca</summary>';
-        const sync=document.createElement('button');sync.type='button';sync.textContent='Sincronizar nomes';sync.onclick=()=>syncStudentIndex(sync);
+        const sync=document.createElement('button');sync.type='button';sync.textContent='Atualizar índice completo';sync.onclick=()=>syncStudentIndex(sync);
         options.append(refresh,sync,clear,el.cacheStatus);container.append(options);
         el.registerStudentBtn=document.createElement('button');el.registerStudentBtn.type='button';el.registerStudentBtn.textContent='Cadastrar aluno';
         el.registerStudentBtn.onclick=openStudentRegistration;container.append(el.registerStudentBtn);
@@ -3677,7 +3690,7 @@
             try{
                 const result=parseDriveResponse(await drivePostJson({action:'registerStudent',student:{root,name,birth},sheet:select.value,createBox:select.selectedOptions[0]?.dataset.newBox==='1'}));
                 if(!result.ok||!result.student)throw new Error(result.error||'Cadastro não confirmado.');
-                try{await clearSearchCache();}catch(error){console.warn('Cache local:',error.message);}
+                try{await cacheRegisteredStudent(result.student);}catch(error){console.warn('Cache local:',error.message);}
                 setBusy(false);selectStudentMatch(result.student,false);dialog.close();
                 renderStudentLocationStatus(result.warning||(result.duplicate?'Aluno já cadastrado: selecionado sem duplicar.':'Aluno cadastrado e pasta digital vinculada.'),result.warning?'warn':'ok');
                 addLog(result.warning||`Cadastro confirmado em ${result.student.root}/${result.student.sheet}.`,result.warning?'warning':'success');
@@ -3823,18 +3836,19 @@
     }
 
     async function prepareSearchBackend() {
-        state.indexSupported=false;
+        state.indexSupported=false;state.changesSupported=false;
         if(!GM_getValue(APP.driveEndpointKey,'')||!GM_getValue(APP.driveTokenKey,''))return;
-        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));}
+        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));state.changesSupported=Boolean(data.ok&&data.capabilities?.includes('studentChanges'));if(state.indexSupported)queueIndexRefresh(el.archiveRoot.value);}
         catch(error){console.warn('Não foi possível verificar o serviço:',error.message);}
     }
 
     async function downloadStudentIndex(root,forceRefresh=false) {
-        const storeKey=await searchCacheKey();let offset=0,version='',records=[],snapshot;
+        const storeKey=await searchCacheKey(),id=storeKey+':index:'+root,generation=indexGeneration(id);let offset=0,version='',records=[],snapshot;
         do{
+            if(indexGeneration(id)!==generation||storeKey!==await searchCacheKey())throw new Error('Atualização interrompida; dados locais preservados.');
             const progress='Sincronizando '+root+' · '+records.length+' nomes...';
-            if(el.cacheStatus)el.cacheStatus.textContent=progress;
-            const boot=document.querySelector('[data-boot="index"]');if(boot)boot.textContent='◌ '+progress;
+            if(el.cacheStatus&&el.archiveRoot.value===root)el.cacheStatus.textContent=progress;
+
             const data=parseDriveResponse(await drivePostJson({action:'getStudentIndex',root,offset,version,createdAt:snapshot?.createdAt,forceRefresh}));
             if(!data.ok)throw new Error(data.error||'Falha ao sincronizar.');
             if(!Array.isArray(data.results)||!data.version||(version&&version!==data.version))throw new Error('Índice mudou durante a sincronização. Tente novamente.');
@@ -3842,8 +3856,59 @@
             records.push(...data.results);version=data.version;offset=data.nextOffset;snapshot=data;
         }while(offset!==null);
         if((snapshot.total!==null&&snapshot.total!==records.length)||snapshot.expiresAt<=Date.now())throw new Error('Índice incompleto ou expirado. Tente novamente.');
-        const index={records,version,createdAt:snapshot.createdAt,expiresAt:snapshot.expiresAt};
-        GM_setValue(storeKey+':index:'+root,index);return index;
+        if(indexGeneration(id)!==generation||storeKey!==await searchCacheKey())throw new Error('O cadastro mudou durante a atualização; o índice local foi preservado.');
+        const index={records,version,epoch:snapshot.epoch,createdAt:snapshot.createdAt,expiresAt:snapshot.expiresAt,checkedAt:Date.now(),fullSyncedAt:Date.now()};
+        GM_setValue(id,index);return index;
+    }
+
+    async function cacheRegisteredStudent(student) {
+        const key=await searchCacheKey(),id=key+':index:'+student.root,index=GM_getValue(id,null);
+        bumpIndexGeneration(id);indexAttempts.delete(id);
+        GM_setValue(key,[]);
+        if(!usableIndex(index))return;
+        index.records=index.records.filter(r=>!(r.sheet===student.sheet&&r.row===student.row));
+        index.records.push(student);
+        // Keep the old cursor: other computers may have registered students in between.
+        GM_setValue(id,index);
+    }
+
+    async function refreshStudentIndex(root,force=false) {
+        const key=await searchCacheKey(),id=key+':index:'+root;
+        if(indexInFlight.has(id)){
+            if(!force)return indexInFlight.get(id);
+            try{await indexInFlight.get(id);}catch(_){}
+            return refreshStudentIndex(root,true);
+        }
+        const generation=indexGeneration(id);
+        const request=(async()=>{
+            const index=GM_getValue(id,null),now=Date.now();
+            if(force||!usableIndex(index)||!index.epoch||!state.changesSupported||now-(index.fullSyncedAt||0)>=INDEX_RECONCILE_MS)return downloadStudentIndex(root,true);
+            const data=parseDriveResponse(await drivePostJson({action:'getStudentChanges',root,epoch:index.epoch}));
+            if(!data.ok)throw new Error(data.error||'Não foi possível atualizar os nomes.');
+            if(indexGeneration(id)!==generation||key!==await searchCacheKey())throw new Error('Cadastro atualizado localmente; novas alterações serão conferidas em seguida.');
+            if(data.reset)return downloadStudentIndex(root,true);
+            if(typeof data.epoch!=='string'||!Array.isArray(data.sheets)||data.sheets.some(s=>!Number.isInteger(s.sheetId)||!Array.isArray(s.records)))throw new Error('Resposta de atualização inválida.');
+            const changed=new Set(data.sheets.map(s=>s.sheetId));
+            const updated={...index,records:index.records.filter(r=>!changed.has(r.sheetId)).concat(data.sheets.flatMap(s=>s.records)),epoch:data.epoch,checkedAt:now};
+            GM_setValue(id,updated);return updated;
+        })();
+        indexInFlight.set(id,request);
+        try{return await request;}finally{indexInFlight.delete(id);}
+    }
+
+    async function queueIndexRefresh(root) {
+        try{
+            if(!state.indexSupported)return;
+            const key=await searchCacheKey(),id=key+':index:'+root,index=GM_getValue(id,null),now=Date.now();
+            if(indexInFlight.has(id)||now-(indexAttempts.get(id)||0)<INDEX_CHECK_MS)return;
+            if(usableIndex(index)&&now-(index.checkedAt||0)<INDEX_CHECK_MS)return;
+            indexAttempts.set(id,now);
+            const updated=await refreshStudentIndex(root);
+            if(el.cacheStatus&&el.archiveRoot.value===root)el.cacheStatus.textContent=updated.records.length+' nomes locais · atualizado '+new Date(updated.checkedAt).toLocaleTimeString('pt-BR');
+        }catch(error){
+            if(el.cacheStatus&&el.archiveRoot.value===root)el.cacheStatus.textContent='Atualização pendente; dados locais preservados. Use Atualizar busca se necessário.';
+            console.warn('Atualização do índice:',error.message);
+        }
     }
 
     async function syncStudentIndex(button) {
@@ -3854,7 +3919,7 @@
             const ping=parseDriveResponse(await drivePostJson({action:'ping'}));
             state.indexSupported=ping.capabilities?.includes('studentIndex') || false;
             if(!ping.ok||!state.indexSupported)throw new Error('Atualize o serviço Google Apps Script para a versão 1.2.0 antes de sincronizar. A busca online continua disponível.');
-            const index=await downloadStudentIndex(root);
+            const index=await refreshStudentIndex(root,true);
             el.cacheStatus.textContent=index.records.length+' nomes disponíveis localmente em '+root+'.';
         }catch(error){el.cacheStatus.textContent=error.message;addLog(error.message,'warning');}
         finally{state.syncingIndex=false;button.disabled=false;refreshSearchControls();}
@@ -3928,18 +3993,6 @@
             }),
             stage('ocr','OCR em português pronto',getOcrWorker)
         ];
-        if(GM_getValue(APP.driveEndpointKey,'')&&GM_getValue(APP.driveTokenKey,'')){
-            const row=document.createElement('li');row.dataset.boot='index';row.textContent='◌ Índice de alunos';overlay.querySelector('ul').append(row);
-            tasks.push(stage('index','Busca de alunos pronta',async()=>{
-                const ping=parseDriveResponse(await drivePostJson({action:'ping'}));
-                if(!ping.ok)throw new Error(ping.error || 'Serviço indisponível.');
-                state.indexSupported=ping.capabilities?.includes('studentIndex') || false;
-                if(state.indexSupported){
-                    const key=await searchCacheKey(),index=GM_getValue(key+':index:'+el.archiveRoot.value,null);
-                    if(!index||index.expiresAt<=Date.now())await downloadStudentIndex(el.archiveRoot.value);
-                }
-            }));
-        }
         const results=await Promise.all(tasks);
         if(generation!==state.bootGeneration)return;
         if(results.every(Boolean)){overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('PDF e OCR prontos.','ok');updateProgress(0,'Sistema pronto');}

@@ -115,3 +115,18 @@ test('falha de pasta conserva cadastro e permite concluir no reenvio',()=>{
  assert.match(c.registerStudentAction_(payload).warning,/cadastrado/);c.prepareStudentFolder_=prepare;
  const second=c.registerStudentAction_(payload);assert.equal(second.duplicate,true);assert.match(second.student.folderUrl,/folders/);assert.equal(box.rows.length,3);
 });
+
+test('incremental lê somente a caixa alterada e não lê Sheets se versão é igual',()=>{
+ const {c}=fixture();let reads=0;c.CacheService={getScriptCache:()=>({remove(){}})};
+ c.SpreadsheetApp={openById:()=>({getSheets:()=>[{getSheetId:()=>1},{getSheetId:()=>2}]})};c.readSheetRecords_=s=>{reads++;return [{sheetId:s.getSheetId(),name:'TESTE'}];};
+ const old=c.indexEpoch_('PERMANENTE');c.invalidateIndex_('PERMANENTE',2);const result=c.getStudentChangesAction_({root:'PERMANENTE',epoch:old});assert.equal(result.sheets.length,1);assert.equal(result.sheets[0].sheetId,2);assert.equal(reads,1);
+ c.SpreadsheetApp.openById=()=>{throw Error('Não deve ler Sheets');};assert.equal(c.getStudentChangesAction_({root:'PERMANENTE',epoch:result.epoch}).sheets.length,0);
+});
+test('histórico incremental perdido ou alteração durante leitura exige recuperação segura',()=>{
+ const {c}=fixture();c.CacheService={getScriptCache:()=>({remove(){}})};const old=c.indexEpoch_('PERMANENTE');
+ for(let i=0;i<41;i++)c.invalidateIndex_('PERMANENTE',1);
+ assert.equal(c.getStudentChangesAction_({root:'PERMANENTE',epoch:old}).reset,true);
+ const before=c.indexEpoch_('PERMANENTE');c.invalidateIndex_('PERMANENTE',1);
+ c.SpreadsheetApp={openById:()=>({getSheets:()=>[{getSheetId:()=>1}]})};c.readSheetRecords_=()=>{c.invalidateIndex_('PERMANENTE',1);return [];};
+ assert.throws(()=>c.getStudentChangesAction_({root:'PERMANENTE',epoch:before}),e=>e.code==='BUSY');
+});

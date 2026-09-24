@@ -11,7 +11,7 @@ function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -64,12 +64,12 @@ test('atualização de localização recusa homônimos sem escrever no Drive',as
  await assert.rejects(t.refreshSelectedStudent(),/homônimos/);
  assert.equal(t.calls(),1);
 });
-test('índice local pesquisa nomes novos sem rede e ignora índice expirado',async()=>{
+test('índice local continua pesquisável após expirar o prazo de conferência',async()=>{
  const t=fixture();const key=await t.searchCacheKey();
  t.values.set(key+':index:PERMANENTE',{expiresAt:Date.now()+10000,createdAt:Date.now(),records:[{name:'MARIA SILVA'},{name:'JOSE TESTE'}]});
  const q={root:'PERMANENTE',query:'Maria',birth:'',maxResults:150};
  const response=await t.cachedStudentSearch(q);assert.equal(t.calls(),0);assert.equal(JSON.parse(response.responseText).results[0].name,'MARIA SILVA');
- t.values.get(key+':index:PERMANENTE').expiresAt=Date.now()-1;await t.cachedStudentSearch(q);assert.equal(t.calls(),1);
+ t.values.get(key+':index:PERMANENTE').expiresAt=Date.now()-1;await t.cachedStudentSearch(q);assert.equal(t.calls(),0);
 });
 test('PDF único corresponde a um download mesmo agrupando vários tipos',()=>{
  const t=fixture();const summary=t.summarizeDestinations([{statusLocal:'✓ Download solicitado'},{statusLocal:'✓ Download solicitado'}],{useLocal:true});assert.equal(summary.downloads,1);
@@ -169,4 +169,39 @@ test('novos tipos: declaração vacinal é distinta de cartão e NIS avulso exig
  }
  const text='Nome do aluno. NIS 12345678901';assert.equal(t.documentOcrSuggestion(t.classifyText(text),text).autoApply,false);
  assert.ok(!source.includes('huggingface'));assert.ok(!source.includes('classifyWithLocalAi'));
+});
+
+test('cadastro preserva índice, insere só o aluno e não avança o cursor de outros computadores',async()=>{
+ const t=fixture(),key=await t.searchCacheKey(),id=key+':index:PERMANENTE';
+ t.values.set(id,{createdAt:1,epoch:'old',records:[{sheet:'A1',row:3,name:'ANA'},{sheet:'B1',row:3,name:'BETO'}]});
+ const student={root:'PERMANENTE',sheetId:1,sheet:'A1',row:4,name:'ALICE'};await t.cacheRegisteredStudent(student);await t.cacheRegisteredStudent(student);
+ assert.equal(t.values.get(id).records.length,3);assert.equal(t.values.get(id).epoch,'old');assert.equal(t.calls(),0);
+});
+
+test('atualização incremental substitui só caixas alteradas, incluindo remoções',async()=>{
+ const t=fixture(p=>{assert.equal(p.action,'getStudentChanges');assert.equal(p.epoch,'old');return {ok:true,epoch:'new',sheets:[{sheetId:1,records:[{sheetId:1,sheet:'A1',row:3,name:'ALICE'}]}]};});
+ t.state.changesSupported=true;const key=await t.searchCacheKey(),id=key+':index:PERMANENTE';
+ t.values.set(id,{createdAt:1,fullSyncedAt:Date.now(),epoch:'old',records:[{sheetId:1,name:'ANA'},{sheetId:2,name:'BETO'}]});
+ const updated=await t.refreshStudentIndex('PERMANENTE');assert.deepEqual(Array.from(updated.records,r=>r.name),['BETO','ALICE']);assert.equal(updated.epoch,'new');assert.equal(t.calls(),1);
+});
+
+test('sem alterações não baixa planilhas; falha preserva cache anterior',async()=>{
+ let fail=false;const t=fixture(()=>fail?{ok:false,error:'offline'}:{ok:true,epoch:'same',sheets:[]});t.state.changesSupported=true;
+ const key=await t.searchCacheKey(),id=key+':index:PERMANENTE';t.values.set(id,{createdAt:1,epoch:'same',fullSyncedAt:Date.now(),records:[{name:'ANA',sheetId:1}]});
+ await t.refreshStudentIndex('PERMANENTE');fail=true;await assert.rejects(t.refreshStudentIndex('PERMANENTE'),/offline/);assert.equal(t.values.get(id).records[0].name,'ANA');
+ t.state.backendReady=new Promise(()=>{});const result=await t.cachedStudentSearch({root:'PERMANENTE',query:'ANA'});assert.equal(JSON.parse(result.responseText).results.length,1);
+});
+
+test('sincronização em andamento não sobrescreve cadastro recém incluído',async()=>{
+ let release,started;const startedPromise=new Promise(r=>started=r);const t=fixture(()=>{started();return new Promise(r=>release=r);});t.state.changesSupported=true;
+ const key=await t.searchCacheKey(),id=key+':index:PERMANENTE';t.values.set(id,{createdAt:1,epoch:'old',fullSyncedAt:Date.now(),records:[]});
+ const pending=t.refreshStudentIndex('PERMANENTE');await startedPromise;await t.cacheRegisteredStudent({root:'PERMANENTE',sheet:'A1',row:3,name:'ANA'});
+ release({ok:true,epoch:'new',sheets:[]});await assert.rejects(pending,/Cadastro atualizado/);assert.equal(t.values.get(id).records[0].name,'ANA');
+});
+
+test('conferência periódica completa é atômica e não reativa índice incompleto',async()=>{
+ let page=0,fail=true;const t=fixture(p=>{assert.equal(p.action,'getStudentIndex');assert.equal(p.forceRefresh,true);page++;if(p.offset)return fail?{ok:false,error:'interrompida'}:{ok:true,version:'v',epoch:'new',results:[{name:'B'}],nextOffset:null,total:null,createdAt:Date.now(),expiresAt:Date.now()+900000};return {ok:true,version:'v',epoch:'new',results:[{name:'A'}],nextOffset:20,total:null,createdAt:Date.now(),expiresAt:Date.now()+900000};});t.state.changesSupported=true;t.el.archiveRoot={value:'PERMANENTE'};
+ const key=await t.searchCacheKey(),id=key+':index:PERMANENTE';t.values.set(id,{createdAt:1,epoch:'old',fullSyncedAt:1,records:[{name:'OLD'}]});
+ await assert.rejects(t.refreshStudentIndex('PERMANENTE'),/interrompida/);assert.equal(t.values.get(id).records[0].name,'OLD');
+ fail=false;const updated=await t.refreshStudentIndex('PERMANENTE');assert.equal(updated.records.length,2);assert.equal(updated.epoch,'new');assert.equal(page,4);
 });
