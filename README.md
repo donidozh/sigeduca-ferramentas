@@ -7,11 +7,11 @@ Userscripts de Elder Martins para uso com o Tampermonkey.
 
 - [GED — Gestão Escolar](ged/): ferramentas usadas em `/ged`, menu azul.
 - [GPE — Gestão de Pessoas](gpe/): pasta para as futuras ferramentas usadas em `/grh`, menu vermelho.
-- [GPO](gpo/): exportador de notas fiscais, menu laranja.
+- [GPO](gpo/): exportador de notas fiscais, menu marrom.
 
-O menu base e o catálogo ficam na raiz. As ferramentas ficam exclusivamente nas pastas de seus módulos. Os endereços antigos da raiz foram removidos. Quem instalou antes da reorganização deve atualizar o menu para 2.8.1 e reinstalar as ferramentas pela central uma vez para receber os novos endereços de atualização.
+O menu base e o catálogo ficam na raiz. As ferramentas ficam exclusivamente nas pastas de seus módulos. Os endereços antigos da raiz foram removidos. Quem instalou antes da reorganização deve atualizar o menu para 2.8.2 e reinstalar as ferramentas pela central uma vez para receber os novos endereços de atualização.
 
-**Atualize o menu para 2.8.1** para ler os novos caminhos do catálogo.
+**Atualize o menu para 2.8.2** para ler os novos caminhos do catálogo.
 
 ## Instalação
 
@@ -109,7 +109,7 @@ A automação de turmas em sigeduca-automatico é um projeto separado e não faz
 
 O menu 2.8.0 identifica o módulo pelo endereço: `/ged` exibe GED em azul; `/grh` exibe GPE em vermelho. O catálogo e os links registrados são filtrados pelo módulo atual. Ainda não há ferramentas GPE publicadas.
 
-Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu também identifica `/gpo` e usa laranja nessa área. Categorias serão definidas posteriormente.
+Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu também identifica `/gpo` e usa marrom nessa área. Categorias serão definidas posteriormente.
 
 O Lançador de Históricos 5.1.0 usa um painel mais próximo do GED, com cabeçalho azul, campos e ações organizados e tabela com rolagem horizontal em telas menores. A lógica de lançamento foi preservada.
 

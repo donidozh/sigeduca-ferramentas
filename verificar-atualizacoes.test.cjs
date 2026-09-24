@@ -201,10 +201,10 @@ test('ferramentas ficam somente nas pastas e rejeitam caminhos indevidos', () =>
  for(const arquivo of ['ged/../x.user.js','ged/a/b.user.js','gpe/../../x.user.js','outro/x.user.js']) assert.throws(()=>m.validarCatalogo({formato:1,ferramentas:[{...catalogoPublicado.ferramentas[0],arquivo}]}));
 });
 
-test('GPO usa laranja e recebe somente seu catálogo', async () => {
+test('GPO usa marrom e recebe somente seu catálogo', async () => {
  const m=menu(o=>o.onload({status:200,responseText:JSON.stringify(catalogoPublicado)}),'gpo');
  assert.equal(m.MODULO_ATUAL.nome,'GPO');
- assert.equal(m.corDoModulo('#065195'),'#A94708');
+ assert.equal(m.corDoModulo('#065195'),'#795035');
  await m.carregarCatalogo();
  assert.equal(m.estadoCatalogo().itens.length,1);
  assert.equal(m.estadoCatalogo().itens[0].id,'notas-fiscais-csv');

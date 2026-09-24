@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Menu Lateral de Ferramentas (Base)
 // @namespace    http://tampermonkey.net/
-// @version      2.8.1
+// @version      2.8.2
 // @description  Menu lateral independente para centralizar os userscripts instalados no SIGEDUCA.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/
@@ -26,7 +26,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.1',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.2',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js'
     });
@@ -83,22 +83,22 @@
         "rgba(0, 93, 164, .12)": "rgba(130,25,35,.12)"
 };
     const CORES_GPO = {
-        "#065195": "#A94708",
-        "#005DA4": "#BD520A",
-        "#034478": "#813604",
-        "#DCEAF6": "#F8E4D2",
-        "#EEF5FB": "#FFF5EB",
+        "#065195": "#795035",
+        "#005DA4": "#8B5D3F",
+        "#034478": "#5D3B28",
+        "#DCEAF6": "#EEDFD3",
+        "#EEF5FB": "#F8F2ED",
         "#1E2A33": "#392C21",
         "#64798A": "#806C59",
-        "#C8D8E5": "#E6D1BA",
-        "#F5F9FC": "#FFFAF4",
-        "#AFC7D9": "#D9BE9F",
-        "#E8F2F9": "#F9EAD8",
-        "#B8CDDD": "#DDC6AA",
+        "#C8D8E5": "#DECEBF",
+        "#F5F9FC": "#FCF9F6",
+        "#AFC7D9": "#C8AE97",
+        "#E8F2F9": "#EFE3D9",
+        "#B8CDDD": "#D6BFAE",
         "#29455A": "#5A4029",
-        "#AFC4D5": "#D5BDA2",
+        "#AFC4D5": "#C8B19E",
         "#5E7689": "#89705E",
-        "#C8DCEB": "#EBD7BD",
+        "#C8DCEB": "#E3D2C3",
         "#17344A": "#4A3017",
         "#71879A": "#9A826B",
         "#7F9AAF": "#AF967B",
@@ -106,12 +106,12 @@
         "#d8e0eb": "#EBDFCD",
         "#203047": "#473420",
         "#526178": "#786652",
-        "#1958b7": "#A94708",
-        "#85baff": "#E9B57C",
-        "rgba(0, 55, 100, .24)": "rgba(140,70,10,.24)",
-        "rgba(0, 55, 100, .18)": "rgba(140,70,10,.18)",
-        "rgba(0, 81, 149, .09)": "rgba(140,70,10,.09)",
-        "rgba(0, 93, 164, .12)": "rgba(140,70,10,.12)"
+        "#1958b7": "#795035",
+        "#85baff": "#C3A18A",
+        "rgba(0, 55, 100, .24)": "rgba(91,58,37,.24)",
+        "rgba(0, 55, 100, .18)": "rgba(91,58,37,.18)",
+        "rgba(0, 81, 149, .09)": "rgba(91,58,37,.09)",
+        "rgba(0, 93, 164, .12)": "rgba(91,58,37,.12)"
 };
     function corDoModulo(cor) {
         if (MODULO_ATUAL.id === "gpo") return CORES_GPO[cor] || cor;
