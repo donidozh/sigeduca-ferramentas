@@ -1,4 +1,6 @@
-# Arquivo Digital 0.10.0
+# Arquivo Digital 0.10.1
+
+A versão 0.10.1 corrige a inicialização da IA, a consulta e a identificação dos arquivos quando `crypto.randomUUID` e `crypto.subtle` não estão disponíveis (como em páginas HTTP). A tela de carregamento preserva a causa de cada falha, em vez de exibir somente uma mensagem genérica.
 
 O script reúne consulta de alunos e organização de documentos. Instale ou atualize `arquivo-digital-aluno.user.js` no Tampermonkey.
 

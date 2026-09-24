@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.10.0
+// @version      0.10.1
 // @description  Arquivo Digital modular com Consulta e Upload; pesquisa de alunos diretamente no Google Sheets, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.10.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.10.1',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.10.0'
+            versao: '0.10.1'
         },
         {
             id: 'arquivo-digital-upload',
@@ -65,7 +65,7 @@
             ordem: 31,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.10.0'
+            versao: '0.10.1'
         }
     ]);
 
@@ -88,7 +88,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.10.0',
+        version: '0.10.1',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -3062,7 +3062,7 @@
 
             const uploadResponse = await drivePostJson({
                 action: 'uploadDocument',
-                requestId: doc.requestId || (doc.requestId=crypto.randomUUID()),
+                requestId: doc.requestId || (doc.requestId=createRequestId()),
                 clientVersion: APP.version,
                 folderId,
                 student: studentPayload(student),
@@ -3328,7 +3328,7 @@
                 const viewport = page.getViewport({scale:APP.thumbnailScale,rotation});
                 const canvas = document.createElement('canvas'); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
                 await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
-                models.push({id:crypto.randomUUID(),originalPage:i+1,docKey:'ignore',rotation,thumbnailDataUrl:canvas.toDataURL('image/jpeg',.82),extractedText:'',aiSuggestion:null,ocrUsed:false,manual:false,reviewed:false,sourceName:sourceNames[i-previousCount]});
+                models.push({id:createRequestId(),originalPage:i+1,docKey:'ignore',rotation,thumbnailDataUrl:canvas.toDataURL('image/jpeg',.82),extractedText:'',aiSuggestion:null,ocrUsed:false,manual:false,reviewed:false,sourceName:sourceNames[i-previousCount]});
                 canvas.width=canvas.height=0;
                 updateProgress(10+40*(i-previousCount+1)/sourceNames.length, `Preparando página ${i+1}...`);
             }
@@ -3473,8 +3473,7 @@
 
     async function searchCacheKey() {
         const scope = `${GM_getValue(APP.driveEndpointKey, '')}\n${GM_getValue(APP.driveTokenKey, '')}`;
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(scope));
-        return 'adig:search:v1:' + [...new Uint8Array(digest)].map(n=>n.toString(16).padStart(2,'0')).join('');
+        return 'adig:search:v1:' + await sha256Hex(new TextEncoder().encode(scope));
     }
 
     async function clearSearchCache() {
@@ -3612,8 +3611,51 @@
 
 
     async function fileSha256(file) {
-        const bytes=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
-        return [...new Uint8Array(bytes)].map(n=>n.toString(16).padStart(2,'0')).join('');
+        return sha256Hex(new Uint8Array(await file.arrayBuffer()));
+    }
+
+    // SIGEDUCA também é servido por HTTP: randomUUID e subtle podem não existir.
+    function createRequestId() {
+        const bytes=crypto.getRandomValues(new Uint8Array(16));
+        bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+        const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+        return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    }
+
+    async function sha256Hex(input) {
+        if(crypto.subtle?.digest){
+            const digest=await crypto.subtle.digest('SHA-256',input);
+            return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+        }
+        // SHA-256 local mantém a mesma chave de cache e identificação dos arquivos.
+        const k=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+            0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+            0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+            0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+            0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+            0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+            0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+            0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+        const bytes=new Uint8Array(Math.ceil((input.length+9)/64)*64);bytes.set(input);bytes[input.length]=128;
+        const view=new DataView(bytes.buffer),bits=input.length*8;
+        view.setUint32(bytes.length-8,Math.floor(bits/4294967296));view.setUint32(bytes.length-4,bits>>>0);
+        const h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+        const w=new Uint32Array(64),ror=(n,s)=>(n>>>s)|(n<<(32-s));
+        for(let offset=0;offset<bytes.length;offset+=64){
+            for(let i=0;i<16;i++)w[i]=view.getUint32(offset+i*4);
+            for(let i=16;i<64;i++){
+                const x=w[i-15],y=w[i-2];
+                w[i]=(w[i-16]+(ror(x,7)^ror(x,18)^(x>>>3))+w[i-7]+(ror(y,17)^ror(y,19)^(y>>>10)))>>>0;
+            }
+            let [a,b,c,d,e,f,g,j]=h;
+            for(let i=0;i<64;i++){
+                const t1=(j+(ror(e,6)^ror(e,11)^ror(e,25))+((e&f)^(~e&g))+k[i]+w[i])>>>0;
+                const t2=((ror(a,2)^ror(a,13)^ror(a,22))+((a&b)^(a&c)^(b&c)))>>>0;
+                j=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+            }
+            [a,b,c,d,e,f,g,j].forEach((n,i)=>h[i]=(h[i]+n)>>>0);
+        }
+        return h.map(n=>n.toString(16).padStart(8,'0')).join('');
     }
 
     function formatBirthDigits(value) {
@@ -3758,7 +3800,7 @@
             state.aiWorker.onerror=event=>stopLocalAi(event.message || 'Não foi possível carregar a IA local.');
         }
         return new Promise((resolve,reject)=>{
-            const id=crypto.randomUUID();
+            const id=createRequestId();
             const timeout=setTimeout(()=>stopLocalAi('Tempo excedido ao carregar/processar a IA local. Tente novamente.'),240000);
             state.aiRequest={id,resolve:value=>{clearTimeout(timeout);resolve(value);},reject:error=>{clearTimeout(timeout);reject(error);}};
             state.aiWorker.postMessage({id,text,references:aiDocumentReferences()});
@@ -3822,13 +3864,20 @@
         const manual=()=>{if(generation!==state.bootGeneration)return;state.bootGeneration++;stopLocalAi();overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('Pré-carregamento interrompido. Clique em Identificar documentos para tentar novamente.','error');};
         overlay.querySelector('.boot-manual').onclick=manual;
         overlay.querySelector('.boot-retry').onclick=()=>{if(generation===state.bootGeneration)preloadArchiveSystem();};
+        const failures=[],completedStages=new Set();
         const stage=async(key,label,work)=>{
             try{await work();if(generation===state.bootGeneration)overlay.querySelector(`[data-boot="${key}"]`).textContent='✓ '+label;return true;}
-            catch(error){if(generation===state.bootGeneration){overlay.querySelector(`[data-boot="${key}"]`).textContent='✗ '+label;overlay.querySelector('.boot-message').textContent=error.message;}return false;}
+            catch(error){if(generation===state.bootGeneration){
+                const component={pdf:'Leitor de PDF',ocr:'OCR em português',ai:'IA local',index:'Busca de alunos'}[key];
+                const message=component+': '+(error.message||String(error));failures.push(message);
+                overlay.querySelector(`[data-boot="${key}"]`).textContent='✗ '+message;
+                overlay.querySelector('.boot-message').textContent=failures.join(' • ');
+                addLog(message,'error');
+            }return false;}finally{completedStages.add(key);}
         };
         const progressTimer=setInterval(()=>{
             if(generation!==state.bootGeneration){clearInterval(progressTimer);return;}
-            if(state.ocrStatus?.includes('Baixando IA')||state.ocrStatus?.includes('Preparando IA'))overlay.querySelector('[data-boot="ai"]').textContent='◌ '+state.ocrStatus;
+            if(!completedStages.has('ai')&&(state.ocrStatus?.includes('Baixando IA')||state.ocrStatus?.includes('Preparando IA')))overlay.querySelector('[data-boot="ai"]').textContent='◌ '+state.ocrStatus;
         },400);
         const tasks=[
             stage('pdf','Leitor de PDF pronto',async()=>{
@@ -3856,7 +3905,7 @@
         clearInterval(progressTimer);
         if(generation!==state.bootGeneration)return;
         if(results.every(Boolean)){overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('PDF, OCR e IA local prontos.','ok');updateProgress(0,'Sistema pronto');}
-        else{overlay.querySelector('.boot-retry').hidden=false;overlay.querySelector('.boot-message').textContent='Um componente não carregou. Verifique a conexão e tente novamente, ou continue com a classificação manual.';}
+        else{overlay.querySelector('.boot-retry').hidden=false;overlay.querySelector('.boot-message').textContent=failures.join(' • ')+' — Tente novamente ou continue com classificação manual.';}
     }
 
     function init() {

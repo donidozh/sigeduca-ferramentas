@@ -2,15 +2,16 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { webcrypto } = require('node:crypto');
+const { webcrypto, createHash } = require('node:crypto');
 const source = fs.readFileSync(require('node:path').join(__dirname, 'ged/arquivo-digital-aluno.user.js'), 'utf8');
 
-function fixture(respond = () => ({ ok: true, results: [] })) {
+function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
   const values = new Map([['adig01:driveEndpoint','https://example.test/exec'],['adig01:driveToken','test-only']]);
   let calls = 0;
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,combineDocumentEvidence,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  Object.assign(context,overrides);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={createRequestId,sha256Hex,fileSha256,classifyWithLocalAi,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,combineDocumentEvidence,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -89,4 +90,36 @@ test('IA discordante ou indisponível exige revisão e não aplica automaticamen
  assert.equal(t.combineDocumentEvidence(rule,{key:'ged_certidao',score:.9,margin:.4},text).autoApply,false);
  assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.2},text).autoApply,true);
  assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.01},text).autoApply,false);
+});
+
+const httpCrypto={getRandomValues:array=>webcrypto.getRandomValues(array)};
+test('HTTP: IDs válidos e únicos sem randomUUID',()=>{
+ const t=fixture(undefined,{crypto:httpCrypto});const ids=Array.from({length:1000},()=>t.createRequestId());
+ assert.equal(new Set(ids).size,ids.length);
+ assert.ok(ids.every(id=>/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)));
+});
+test('HTTP: SHA-256 sem subtle coincide com implementação nativa, inclusive limites de blocos',async()=>{
+ const t=fixture(undefined,{crypto:httpCrypto});
+ for(const input of [Buffer.from(''),Buffer.from('abc'),Buffer.from('Certidão — João'),...Array.from([55,56,63,64,65,127,128,1000000],n=>Buffer.alloc(n,97))]){
+  assert.equal(await t.sha256Hex(input),createHash('sha256').update(input).digest('hex'));
+ }
+ const data=Buffer.from('%PDF-1.7 teste de arquivo');
+ assert.equal(await t.fileSha256({arrayBuffer:async()=>Uint8Array.from(data).buffer}),createHash('sha256').update(data).digest('hex'));
+});
+test('HTTP: consulta e índice reutilizam o mesmo cache sem depender de digest',async()=>{
+ const t=fixture(undefined,{crypto:httpCrypto}),secure=fixture();
+ assert.equal(await t.searchCacheKey(),await secure.searchCacheKey());
+ const query={root:'PERMANENTE',query:'Maria',maxResults:150};
+ await t.cachedStudentSearch(query);await t.cachedStudentSearch(query);assert.equal(t.calls(),1);
+ const key=await t.searchCacheKey();
+ t.values.set(key+':index:FORMANDOS',{createdAt:Date.now(),expiresAt:Date.now()+10000,records:[{name:'JOSE TESTE'}]});
+ const response=await t.cachedStudentSearch({root:'FORMANDOS',query:'Jose',maxResults:150});
+ assert.equal(JSON.parse(response.responseText).results[0].name,'JOSE TESTE');assert.equal(t.calls(),1);
+});
+test('HTTP: requisição de IA chega ao worker sem randomUUID',async()=>{
+ let request;
+ class FakeWorker{postMessage(data){request=data;this.onmessage({data:{id:data.id,result:{key:'ged_historico'}}});}}
+ const t=fixture(undefined,{crypto:httpCrypto,Blob,Worker:FakeWorker});
+ assert.equal((await t.classifyWithLocalAi('Histórico escolar')).key,'ged_historico');
+ assert.match(request.id,/^[0-9a-f-]{36}$/);URL.revokeObjectURL(t.state.aiWorkerUrl);
 });
