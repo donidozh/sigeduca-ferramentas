@@ -1,14 +1,10 @@
-# Arquivo Digital 0.11.0
+# Arquivo Digital 0.12.0
 
-A versão 0.11.0 exige um aluno selecionado da planilha antes de enviar ao Drive ou ao GED. Se ainda não existir, use **Cadastrar aluno**: informe nome e nascimento, escolha uma caixa da inicial do nome ou **Abrir nova caixa**. Todas as caixas ficam disponíveis; o técnico escolhe conforme o espaço físico. O serviço confere duplicidade, insere o cadastro e prepara a pasta digital com seu vínculo. Se a preparação da pasta falhar, o cadastro é preservado e uma nova tentativa conclui o vínculo.
+O sistema exige um aluno selecionado da planilha antes de enviar ao Drive ou ao GED. Se ainda não existir, use **Cadastrar aluno**: informe nome e nascimento, escolha uma caixa da inicial do nome ou **Abrir nova caixa**. Todas as caixas ficam disponíveis; o técnico escolhe conforme o espaço físico. O serviço confere duplicidade, insere o cadastro e prepara a pasta digital com seu vínculo. Se a preparação da pasta falhar, o cadastro é preservado e uma nova tentativa conclui o vínculo.
 
 **Duplicar página** cria uma cópia independente para classificar dois documentos digitalizados na mesma folha. A cópia contém a folha inteira, sem recorte automático, e pode receber outro tipo e outra rotação. A lista de classificação agora é única, com nomes como RG/CPF Aluno, RG/CPF Responsável, Cartão de Vacina, Tipo Sanguíneo e Certidão de Nascimento.
 
 Novas caixas usam título na linha 1 e as colunas Nº, Nome, Data de nascimento, Pasta Digital e Observações na linha 2, com cabeçalho fixo. O cadastro e a criação de caixas são coordenados pelo serviço para evitar duplicação em acessos simultâneos. Os uploads de pastas diferentes continuam em paralelo.
-
-A versão 0.10.2 usa IndexedDB para guardar o modelo quando a Cache API está indisponível, como em HTTP. Se o armazenamento for recusado ou estiver cheio, o modelo ainda pode ser usado, mas poderá precisar de novo download. As chamadas ao Web App usam a chave configurada, sem cookies de sessões Google. Erros HTTP aparecem como mensagens curtas, sem despejar páginas HTML na interface.
-
-A versão 0.10.1 corrige a inicialização da IA, a consulta e a identificação dos arquivos quando `crypto.randomUUID` e `crypto.subtle` não estão disponíveis (como em páginas HTTP). A tela de carregamento preserva a causa de cada falha, em vez de exibir somente uma mensagem genérica.
 
 O script reúne consulta de alunos e organização de documentos. Instale ou atualize `arquivo-digital-aluno.user.js` no Tampermonkey.
 
@@ -16,7 +12,7 @@ O script reúne consulta de alunos e organização de documentos. Instale ou atu
 
 - Adicione vários PDFs, JPGs e PNGs, até 120 MB no conjunto. Novos arquivos são acrescentados às páginas existentes. Uma importação inválida preserva o trabalho aberto.
 - Marque páginas para classificar, girar ou ignorar em lote. Use os filtros e Desfazer para revisar a organização.
-- Identificar documentos executa leitura de texto/OCR e IA local em um clique. Escolhas manuais são preservadas; evidências fracas ou discordantes exigem revisão. As pontuações não representam probabilidades.
+- Identificar documentos executa leitura de texto/OCR em um clique. Escolhas manuais são preservadas; evidências fracas ou discordantes exigem revisão.
 - O rascunho automático guarda os documentos e a organização no navegador. Aguarde a indicação de salvamento, ou use Rascunho → Salvar rascunho agora. Limpar remove o rascunho. Os dados não são enviados ao GitHub.
 - Revise aluno, código, destinos, tipos e páginas ignoradas antes de confirmar. O download local contém as páginas selecionadas na ordem atual.
 - Para GED, documentos acima de 5 MB precisam de redução aprovada na prévia. A redução rasteriza as páginas e pode remover texto pesquisável/assinaturas; o PDF único local mantém a cópia original das páginas.
@@ -30,15 +26,13 @@ Com o backend 1.2.0, a sincronização baixa um índice de PERMANENTE ou FORMAND
 
 Durante a consulta ou sincronização, a seleção de arquivo fica bloqueada. Ao trocar de arquivo depois da conclusão, a seleção anterior do aluno é descartada. Digite apenas os números do nascimento: `25032010` vira `25/03/2010`. Datas impossíveis, futuras ou incompletas são recusadas.
 
-## Carregamento e IA local
+## Carregamento e OCR
 
-Ao abrir a tela de upload, “Carregando o sistema” prepara PDF, OCR em português, IA e o índice do arquivo selecionado, quando o serviço está configurado. Há opção de tentar novamente ou continuar com classificação manual se algum recurso falhar.
+A versão 0.12.0 remove a IA, seu modelo e seu pré-carregamento. A tela prepara somente PDF, OCR em português e a busca de alunos quando configurada. O Tesseract ainda pode baixar os arquivos necessários ao OCR no primeiro uso.
 
-O modelo gratuito [mDeBERTa multilíngue para classificação](https://huggingface.co/onnx-community/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7-ONNX) substitui a comparação de similaridade do MiniLM anterior. O download automático tem aproximadamente 338 MB na versão quantizada, além do leitor de texto e arquivos de execução, e fica no cache do navegador. O primeiro carregamento exige internet e pode demorar. Limpeza do cache ou outro navegador pode exigir novo download. O processamento ocorre no computador, sem enviar documentos ao provedor da IA.
+**Identificar documentos** lê o texto do PDF ou executa OCR. Títulos e conjuntos de campos característicos identificam o tipo; palavras-chave isoladas exigem revisão. A classificação manual é preservada. RG/CPF sempre pede confirmar se pertence ao aluno ou ao responsável. Folhas com dois tipos identificados sugerem duplicação.
 
-A identificação combina títulos, conjuntos de campos característicos e o classificador. Quando o OCR fica fraco, tenta outras orientações de leitura. Folhas com evidências de mais de um tipo pedem revisão e sugerem duplicação. RG/CPF exige confirmar a titularidade (aluno ou responsável); a IA não decide isso sozinha. Resultados pouco discriminativos ficam como Diversos/revisar. Pontuações não são uma taxa de acerto, e o modelo não foi treinado nos documentos da escola.
-
-Validação da versão: 26 testes do script e 16 do serviço, além de 16 verificações de PDF, imagem, rascunho e duplicação no navegador. O fluxo de cadastro foi conferido com serviço simulado e a listagem de caixas com leitura nas planilhas reais. O classificador foi executado em HTTP sem Web Crypto/Cache API: em 14 textos sintéticos sem títulos explícitos, escolheu o tipo esperado em 11; isso não mede precisão em digitalizações reais. Os erros motivaram regras para campos característicos e critérios conservadores de revisão. Nenhum aluno fictício foi cadastrado nas planilhas reais.
+A lista inclui **NIS/CadÚnico**, **Declaração Vacinal** (separada do Cartão de Vacina) e **Atestados Médicos**. O nome plural substitui Atestado Médico mantendo a categoria existente e a compatibilidade dos rascunhos. Os dois novos tipos podem ser arquivados no Drive e baixados; não têm código de anexo GED associado.
 
 O código do SIGEDUCA aparece somente quando o destino GED está selecionado.
 
@@ -60,7 +54,7 @@ Na instalação nova, configure nas **Propriedades do script**:
 
 Na migração de um projeto existente, preserve os IDs e a chave da configuração privada. O serviço aceita o bloco CONFIG anterior durante a migração; o restante deve ser substituído integralmente para evitar funções duplicadas. Não copie configurações privadas para o GitHub.
 
-Atualize a implantação existente como Web App, mantendo o endereço e as permissões já utilizadas. Teste a ação `ping`: a resposta deve indicar versão `1.2.0` e capacidades `studentIndex`, `idempotentUpload` e `parallelFolders`.
+Atualize a implantação existente como Web App, mantendo o endereço e as permissões já utilizadas. Teste a ação `ping`: a resposta deve indicar versão `1.3.0` e capacidades `studentIndex`, `idempotentUpload`, `parallelFolders` e `studentRegistration`.
 
 ## Trabalho simultâneo
 

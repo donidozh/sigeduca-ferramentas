@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.11.0
+// @version      0.12.0
 // @description  Arquivo Digital modular com Consulta e Upload; pesquisa de alunos diretamente no Google Sheets, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.11.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.12.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.11.0'
+            versao: '0.12.0'
         },
         {
             id: 'arquivo-digital-upload',
@@ -65,7 +65,7 @@
             ordem: 31,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.11.0'
+            versao: '0.12.0'
         }
     ]);
 
@@ -88,7 +88,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.11.0',
+        version: '0.12.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -160,8 +160,16 @@
             label: 'Ficha de Matrícula', short: 'Ficha de Matrícula', group: 'archive', gedId: null,
             keywords: ['ficha de matricula', 'ficha de matrícula', 'dados do aluno', 'dados do estudante', 'responsavel legal', 'responsável legal']
         },
+        arquivo_nis: {
+            label: 'NIS/CadÚnico', short: 'NIS/CadÚnico', group: 'archive', gedId: null,
+            keywords: ['nis', 'cadunico', 'cadastro unico', 'numero de identificacao social']
+        },
+        arquivo_declaracao_vacinal: {
+            label: 'Declaração Vacinal', short: 'Declaração Vacinal', group: 'archive', gedId: null,
+            keywords: ['declaracao vacinal', 'declaracao de vacinacao', 'declaracao de situacao vacinal', 'declaracao de regularidade vacinal']
+        },
         arquivo_atestado_medico: {
-            label: 'Atestado Médico', short: 'Atestado Médico', group: 'archive', gedId: null,
+            label: 'Atestados Médicos', short: 'Atestados Médicos', group: 'archive', gedId: null,
             keywords: ['atestado medico', 'atestado médico', 'crm', 'declaro para os devidos fins', 'afastamento', 'dias de afastamento']
         },
         arquivo_ficha_individual: {
@@ -1171,7 +1179,7 @@
         el.clearBtn.addEventListener('click', () => clearAll(true));
         el.cancelBtn.addEventListener('click', () => {
             state.cancelled = true;
-            stopLocalAi();
+
             if(state.ocrWorker){state.ocrWorker.terminate();state.ocrWorker=null;state.ocrWorkerPromise=null;}
             addLog('Cancelamento solicitado.', 'warning');
         });
@@ -1446,7 +1454,7 @@
         if (normalized.includes('HISTOR')) return 'Histórico Escolar';
         if (normalized.includes('FICHA INDIVIDUAL')) return 'Ficha Individual';
         if (normalized.includes('MATRIC')) return 'Ficha de Matrícula';
-        if (normalized.includes('ATESTADO')) return 'Atestado Médico';
+        if (normalized.includes('ATESTADO')) return 'Atestados Médicos';
         if (normalized.includes('CERTIFIC') || normalized.includes('DIPLOMA')) return 'Certificado / Diploma';
         if (normalized.includes('SUS')) return 'Cartão SUS';
         if (normalized.includes('PAED')) return 'Documentos PAEDE';
@@ -2408,7 +2416,9 @@
             ['arquivo_cartao_sus',/\bcartao\s+(?:nacional\s+de\s+saude|sus)\b/],
             ['ged_sangue',/\b(?:tipagem\s+sanguinea|grupo\s+sanguineo|sistema\s+abo)\b/],
             ['ged_oftalmo',/\b(?:atestado|exame|avaliacao)\s+(?:medico\s+)?(?:oftalmologic[ao]|optometric[ao])\b/],
-            ['arquivo_atestado_medico',/\batestado\s+medico\b/],
+            ['arquivo_atestado_medico',/\batestados?\s+medicos?\b/],
+            ['arquivo_nis',/\b(?:cadunico|cadastro\s+unico|numero\s+de\s+identificacao\s+social)\b/],
+            ['arquivo_declaracao_vacinal',/\bdeclaracao\s+(?:de\s+)?(?:(?:situacao|regularidade|atualizacao)\s+)?(?:vacinal|vacinacao|vacinas)\b/],
             ['arquivo_termo_compromisso',/\btermo\s+de\s+compromisso\b/],
             ['arquivo_certificado',/\b(?:certificado|diploma)\s+de\s+conclusao\b/],
             ['ged_energia',/\b(?:fatura|conta)\s+de\s+energia\b|\benergia\s+eletrica\b/]
@@ -2433,7 +2443,8 @@
     function classifyText(text) {
         const normalized = normalizeLoose(text);
         const explicitTitles=detectDocumentTitle(text);
-        const titles=[...new Set([...explicitTitles,...documentStructureEvidence(text)])];
+        const structure=documentStructureEvidence(text).filter(key=>!(key==='ged_vacina'&&explicitTitles.includes('arquivo_declaracao_vacinal')));
+        const titles=[...new Set([...explicitTitles,...structure])];
         if(titles.length===1)return {key:titles[0],confidence:.98,hits:[],points:100,titleMatch:explicitTitles.includes(titles[0]),structureMatch:!explicitTitles.includes(titles[0])};
         if(titles.length>1)return {key:titles[0],confidence:.65,hits:[],points:0,multipleDocuments:true};
         if (normalized.length < 20) return { key: 'arquivo_diversos', confidence: 0, hits: [] };
@@ -2518,7 +2529,7 @@
         if(suggestion.engine){
             line.className='ai-line '+(suggestion.autoApply?'ai-high':'ai-mid');
             line.textContent=`${meta.short} · ${suggestion.reason}`;
-            line.title=suggestion.engine==='local-ai'?'Análise semântica executada neste computador; os escores não são probabilidades.':'Somente palavras-chave: a IA não foi executada nesta página.';
+            line.title='Identificação pelo texto do PDF ou OCR; confira as sugestões antes de enviar.';
             if(!suggestion.autoApply&&suggestion.key!=='arquivo_diversos'){
                 const apply=document.createElement('button');apply.type='button';apply.textContent='Aplicar sugestão';
                 apply.onclick=()=>{if(state.processing)return;rememberEdit();model.docKey=suggestion.key;model.manual=true;model.reviewed=true;invalidateBatch();redrawPages();scheduleDraft();};line.append(' ',apply);
@@ -3700,9 +3711,9 @@
         left.append(help);
         const hint=el.dropzone.querySelector(':scope > .tiny');if(hint)hint.textContent='PDF, JPG ou PNG · até 120 MB';
         el.autoDetectBtn.textContent='Identificar documentos';
-        el.autoDetectBtn.title='Executa OCR e IA local em um clique; preserva escolhas manuais.';
+        el.autoDetectBtn.title='Identifica pelo texto do PDF ou OCR; preserva escolhas manuais.';
         el.acceptAiBtn.hidden=true;
-        const aiHelp=document.createElement('p');aiHelp.className='tiny';aiHelp.textContent='Identificar documentos combina OCR e IA local gratuita. No primeiro uso, baixa cerca de 338 MB do modelo, além dos arquivos de execução. Os documentos não são enviados ao provedor da IA. Casos duvidosos ficam para revisão.';content.prepend(aiHelp);
+        const aiHelp=document.createElement('p');aiHelp.className='tiny';aiHelp.textContent='Identificar documentos usa o texto do PDF ou OCR em português. Casos duvidosos ficam para revisão.';content.prepend(aiHelp);
         const draft=document.createElement('details');draft.innerHTML='<summary>Rascunho</summary>';draft.style.marginLeft='auto';
         for(const name of ['draft','restore','draft-status'])draft.append(bar.querySelector(`[data-tool="${name}"]`));
         bar.append(draft);
@@ -3850,137 +3861,18 @@
     }
 
 
-    async function configureLocalModelCache(env) {
-        env.useBrowserCache=false;env.useCustomCache=false;
-        try{
-            if(typeof caches!=='undefined'){await caches.open('transformers-cache');env.useBrowserCache=true;return;}
-        }catch(_){/* Cache API bloqueada: tenta armazenamento compatível com HTTP. */}
-        if(typeof indexedDB==='undefined')return;
-        let db;
-        try{
-            db=await new Promise((resolve,reject)=>{
-                const request=indexedDB.open('sigeduca-modelos-ia',1);
-                request.onupgradeneeded=()=>request.result.createObjectStore('files');
-                request.onsuccess=()=>resolve(request.result);
-                request.onerror=()=>reject(request.error);
-                request.onblocked=()=>reject(new Error('Armazenamento de modelos ocupado.'));
-            });
-        }catch(_){return;}
-        db.onversionchange=()=>db.close();
-        const transact=(mode,key,value)=>new Promise((resolve,reject)=>{
-            const tx=db.transaction('files',mode),store=tx.objectStore('files');
-            const request=mode==='readonly'?store.get(key):store.put(value,key);
-            tx.oncomplete=()=>resolve(request.result);
-            tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
-        });
-        env.customCache={
-            async match(key){
-                try{const saved=await transact('readonly',String(key));return saved?new Response(saved.body,{status:200,headers:saved.headers}):undefined;}
-                catch(_){return undefined;}
-            },
-            async put(key,response){
-                try{
-                    if(response.status!==200)return;
-                    const copy=response.clone(),body=await copy.arrayBuffer();
-                    const headers={};for(const name of ['content-type','content-length']){const value=copy.headers.get(name);if(value)headers[name]=value;}
-                    await transact('readwrite',String(key),{body,headers});
-                }catch(_){/* Falta de espaço não impede usar o modelo já baixado. */}
-            }
-        };
-        env.useCustomCache=true;
-    }
-
-    function localAiWorkerProgram() {
-        let classifier;
-        self.onmessage = async ({data}) => {
-            try {
-                if (!classifier) {
-                    const {pipeline,env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
-                    env.allowLocalModels = false;
-                    await configureLocalModelCache(env);
-                    env.backends.onnx.wasm.numThreads = 1;
-                    classifier = await pipeline('zero-shot-classification','onnx-community/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7-ONNX',{
-                        dtype:'q8',device:'wasm',revision:'cdc8277b4682665e2f2e87cd83da7da07b153d75',
-                        progress_callback: p => self.postMessage({id:data.id,progress:p.status==='progress' ? `Baixando IA local: ${Math.round(p.progress || 0)}%` : 'Preparando IA local...'})
-                    });
-                }
-                const text=String(data.text || '').replace(/\s+/g,' ').trim();
-                // One identity category: the document alone cannot establish student vs guardian.
-                const references=data.references.filter(r=>r.key!=='ged_responsavel');
-                const excerpt=text.length>1800?text.slice(0,1400)+' '+text.slice(-400):text;
-                const result=await classifier(excerpt,references.map(r=>r.text),{hypothesis_template:'Este documento é {}.',multi_label:true});
-                const ranked=result.labels.map((label,i)=>({key:references.find(r=>r.text===label).key,score:result.scores[i]}));
-                self.postMessage({id:data.id,result:{key:ranked[0].key,score:ranked[0].score,margin:ranked[0].score-(ranked[1]?.score || 0),alternatives:ranked.slice(0,3)}});
-            } catch(error) { self.postMessage({id:data.id,error:error.message || String(error)}); }
-        };
-    }
-
-    function aiDocumentReferences() {
-        const descriptions={
-            ged_responsavel:'um documento de identificação pessoal do responsável',
-            ged_certidao:'uma certidão de nascimento emitida por cartório de registro civil',
-            ged_rgcpf:'um documento de identificação pessoal, carteira de identidade ou CPF',
-            ged_energia:'uma conta de consumo de energia elétrica',
-            ged_sangue:'um exame que informa o tipo sanguíneo e fator Rh',
-            ged_vacina:'um cartão que registra as vacinas e doses recebidas',
-            ged_oftalmo:'um exame médico de visão e acuidade visual',
-            ged_historico:'um histórico escolar com disciplinas, notas e séries cursadas',
-            arquivo_ficha_individual:'uma ficha individual de notas e frequência escolar por bimestre',
-            arquivo_ficha_matricula:'uma ficha de matrícula e cadastro do aluno na escola',
-            arquivo_atestado_medico:'um atestado médico para afastamento por doença',
-            arquivo_certificado:'um certificado ou diploma de conclusão de curso',
-            arquivo_cartao_sus:'um cartão de identificação do usuário do SUS, com número CNS',
-            arquivo_termo_compromisso:'um termo de compromisso assinado pelo responsável',
-            ged_paed:'um documento sobre atendimento educacional especializado',
-            arquivo_paede:'um plano de atendimento educacional especializado'
-        };
-        return Object.entries(DOCUMENT_TYPES).filter(([key])=>!['ignore','arquivo_diversos'].includes(key)).map(([key,meta])=>({key,text:descriptions[key] || `${meta.label}. ${(meta.keywords || []).join(', ')}.`}));
-    }
-
-    function stopLocalAi(reason='Identificação cancelada.') {
-        state.aiWorker?.terminate();state.aiWorker=null;
-        if(state.aiWorkerUrl)URL.revokeObjectURL(state.aiWorkerUrl);
-        state.aiWorkerUrl=null;
-        state.aiRequest?.reject(new Error(reason));state.aiRequest=null;
-    }
-
-    function classifyWithLocalAi(text) {
-        if (!state.aiWorker) {
-            state.aiWorkerUrl=URL.createObjectURL(new Blob([`${configureLocalModelCache.toString()}\n(${localAiWorkerProgram.toString()})()`],{type:'text/javascript'}));
-            state.aiWorker=new Worker(state.aiWorkerUrl,{type:'module'});
-            state.aiWorker.onmessage=({data})=>{
-                const pending=state.aiRequest;if(!pending || data.id!==pending.id)return;
-                if(data.progress){setOcrStatus(data.progress,'loading');updateProgress(55,data.progress);return;}
-                state.aiRequest=null;
-                if(data.error)pending.reject(new Error(data.error));else pending.resolve(data.result);
-            };
-            state.aiWorker.onerror=event=>stopLocalAi(event.message || 'Não foi possível carregar a IA local.');
-        }
-        return new Promise((resolve,reject)=>{
-            const id=createRequestId();
-            const timeout=setTimeout(()=>stopLocalAi('Tempo excedido ao carregar/processar a IA local. Tente novamente.'),240000);
-            state.aiRequest={id,resolve:value=>{clearTimeout(timeout);resolve(value);},reject:error=>{clearTimeout(timeout);reject(error);}};
-            state.aiWorker.postMessage({id,text,references:aiDocumentReferences()});
-        });
-    }
-
-    function combineDocumentEvidence(rule,semantic,text) {
-        if(rule.multipleDocuments)return {...rule,autoApply:false,confidence:.65,engine:semantic?'local-ai':'rules-only',reason:'Mais de um tipo na folha — duplique a página e classifique cada cópia'};
-        if(rule.titleMatch)return {...rule,autoApply:true,engine:semantic?'local-ai':'rules-only',reason:'Identificado pelo título do documento'};
-        if(rule.structureMatch)return {...rule,autoApply:true,engine:semantic?'local-ai':'rules-only',reason:'Identificado por campos característicos do documento'};
-        const enoughText=normalizeLoose(text).replace(/[^a-z]/g,'').length>=40;
-        if(!semantic)return {...rule,confidence:Math.min(rule.confidence,.70),autoApply:false,engine:'rules-only',reason:'IA indisponível — revisar'};
-        const same=rule.key===semantic.key;
-        const ambiguousPersonal=['ged_responsavel','ged_rgcpf'].includes(semantic.key);
-        const autoApply=enoughText&&same&&rule.confidence>=.85&&semantic.score>=.70&&semantic.margin>=.25&&!ambiguousPersonal;
-        const key=rule.confidence>=.85&&!same?rule.key:semantic.score<.45||semantic.margin<.12?'arquivo_diversos':semantic.key;
-        return {key,confidence:autoApply?.90:.65,autoApply,engine:'local-ai',semanticScore:semantic.score,margin:semantic.margin,alternatives:semantic.alternatives,hits:rule.hits,reason:ambiguousPersonal?'Confirme se o RG/CPF é do aluno ou do responsável':!enoughText?'Pouco texto — revisar':!same?'IA e palavras-chave divergem — revisar':autoApply?'OCR/texto e IA concordam':'Sugestão da IA — revisar'};
+    function documentOcrSuggestion(rule,text) {
+        const engine='ocr';
+        if(rule.multipleDocuments)return {...rule,autoApply:false,confidence:.65,engine,reason:'Mais de um tipo na folha — duplique a página e classifique cada cópia'};
+        if(['ged_responsavel','ged_rgcpf'].includes(rule.key))return {...rule,autoApply:false,confidence:Math.min(rule.confidence,.70),engine,reason:'Confirme se o RG/CPF é do aluno ou do responsável'};
+        if(rule.titleMatch||rule.structureMatch)return {...rule,autoApply:true,engine,reason:rule.titleMatch?'Identificado pelo título do documento':'Identificado por campos característicos do documento'};
+        return {...rule,confidence:Math.min(rule.confidence,.70),autoApply:false,engine,reason:'Sugestão por palavras-chave — revisar'};
     }
 
     async function identifyDocumentsOneClick() {
         if(!state.pdfjsDocument||state.processing)return;
         rememberEdit();setBusy(true);state.cancelled=false;
-        let autoApplied=0,review=0,failed=0,aiAvailable=true;
+        let autoApplied=0,review=0,failed=0;
         try{
             for(let i=0;i<state.pageModels.length;i++){
                 if(state.cancelled)break;
@@ -3990,15 +3882,7 @@
                     updateProgress(10+75*i/state.pageModels.length,`Lendo página ${i+1}/${state.pageModels.length}...`);
                     const text=await readPageTextWithOcr(model);if(state.cancelled)break;
                     model.extractedText=text;
-                    const rule=classifyText(text);let semantic=null;
-                    if(aiAvailable&&text.trim().length>=20){
-                        setOcrStatus(`IA local: analisando página ${i+1}...`,'loading');
-                        try{semantic=await classifyWithLocalAi(text);}catch(error){
-                            if(state.cancelled)break;
-                            aiAvailable=false;stopLocalAi();addLog(`IA local indisponível: ${error.message}. Resultados por palavras-chave exigem revisão.`,'warning');
-                        }
-                    }
-                    model.aiSuggestion=combineDocumentEvidence(rule,semantic,text);
+                    model.aiSuggestion=documentOcrSuggestion(classifyText(text),text);
                     if(model.aiSuggestion.autoApply){model.docKey=model.aiSuggestion.key;autoApplied++;}else review++;
                     renderAiSuggestion(model);
                 }catch(error){failed++;model.aiSuggestion={key:'arquivo_diversos',confidence:0,autoApply:false,engine:'rules-only',reason:'Leitura falhou — revisar'};addLog(`Página ${i+1}: ${error.message}`,'error');renderAiSuggestion(model);}
@@ -4007,7 +3891,7 @@
             invalidateBatch();redrawPages();
             const message=`${autoApplied} página(s) classificada(s), ${review} para revisar, ${failed} falha(s).`;
             updateProgress(state.cancelled?50:70,state.cancelled?'Identificação cancelada. Alterações já concluídas foram mantidas.':message);
-            setOcrStatus(aiAvailable?'OCR e IA local prontos.':'IA indisponível; confira as sugestões por palavras-chave.',aiAvailable?'ok':'error');
+            setOcrStatus(failed?'OCR concluído com falhas de leitura.':'OCR concluído.',failed?'error':'ok');
             addLog(message,failed||review?'warning':'success');
         }finally{setBusy(false);scheduleDraft();}
     }
@@ -4019,26 +3903,22 @@
         document.getElementById(`${APP.id}-loading`)?.remove();
         const overlay=document.createElement('div');overlay.id=`${APP.id}-loading`;
         overlay.style.cssText='position:fixed;inset:0;z-index:2147483500;background:#f3f6fa;display:grid;place-items:center;font:14px Arial;color:#23334b';
-        overlay.innerHTML='<section style="width:min(480px,90vw);background:white;border:1px solid #dce3ed;border-radius:18px;padding:32px;box-shadow:0 12px 45px #21334b12"><h1 style="font-size:23px;margin:0 0 8px">Carregando o sistema</h1><p style="color:#66758b">Preparando o Arquivo Digital neste computador.</p><ul style="list-style:none;padding:0;line-height:2.2"><li data-boot="pdf">◌ Leitor de PDF</li><li data-boot="ocr">◌ OCR em português</li><li data-boot="ai">◌ IA local</li></ul><p class="boot-message" role="status" style="font-size:12px;color:#66758b">O primeiro uso baixa o modelo de IA. Os próximos acessos reutilizam o cache disponível.</p><button class="boot-retry" hidden style="padding:10px">Tentar novamente</button><button class="boot-manual" style="padding:10px;margin-top:12px">Continuar com classificação manual</button></section>';
+        overlay.innerHTML='<section style="width:min(480px,90vw);background:white;border:1px solid #dce3ed;border-radius:18px;padding:32px;box-shadow:0 12px 45px #21334b12"><h1 style="font-size:23px;margin:0 0 8px">Carregando o sistema</h1><p style="color:#66758b">Preparando o Arquivo Digital neste computador.</p><ul style="list-style:none;padding:0;line-height:2.2"><li data-boot="pdf">◌ Leitor de PDF</li><li data-boot="ocr">◌ OCR em português</li></ul><p class="boot-message" role="status" style="font-size:12px;color:#66758b">Preparando a leitura de PDFs e o OCR em português.</p><button class="boot-retry" hidden style="padding:10px">Tentar novamente</button><button class="boot-manual" style="padding:10px;margin-top:12px">Continuar com classificação manual</button></section>';
         document.body.append(overlay);overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');el.app.inert=true;setBusy(true);state.cancelled=false;
-        const manual=()=>{if(generation!==state.bootGeneration)return;state.bootGeneration++;stopLocalAi();overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('Pré-carregamento interrompido. Clique em Identificar documentos para tentar novamente.','error');};
+        const manual=()=>{if(generation!==state.bootGeneration)return;state.bootGeneration++;overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('Pré-carregamento interrompido. Clique em Identificar documentos para tentar novamente.','error');};
         overlay.querySelector('.boot-manual').onclick=manual;
         overlay.querySelector('.boot-retry').onclick=()=>{if(generation===state.bootGeneration)preloadArchiveSystem();};
-        const failures=[],completedStages=new Set();
+        const failures=[];
         const stage=async(key,label,work)=>{
             try{await work();if(generation===state.bootGeneration)overlay.querySelector(`[data-boot="${key}"]`).textContent='✓ '+label;return true;}
             catch(error){if(generation===state.bootGeneration){
-                const component={pdf:'Leitor de PDF',ocr:'OCR em português',ai:'IA local',index:'Busca de alunos'}[key];
+                const component={pdf:'Leitor de PDF',ocr:'OCR em português',index:'Busca de alunos'}[key];
                 const message=component+': '+(error.message||String(error));failures.push(message);
                 overlay.querySelector(`[data-boot="${key}"]`).textContent='✗ '+message;
                 overlay.querySelector('.boot-message').textContent=failures.join(' • ');
                 addLog(message,'error');
-            }return false;}finally{completedStages.add(key);}
+            }return false;}
         };
-        const progressTimer=setInterval(()=>{
-            if(generation!==state.bootGeneration){clearInterval(progressTimer);return;}
-            if(!completedStages.has('ai')&&(state.ocrStatus?.includes('Baixando IA')||state.ocrStatus?.includes('Preparando IA')))overlay.querySelector('[data-boot="ai"]').textContent='◌ '+state.ocrStatus;
-        },400);
         const tasks=[
             stage('pdf','Leitor de PDF pronto',async()=>{
                 if(!window.PDFLib||!window.pdfjsLib)throw new Error('As bibliotecas de PDF não carregaram. Atualize a página.');
@@ -4046,8 +3926,7 @@
                 const pdf=await PDFLib.PDFDocument.create();pdf.addPage([10,10]);
                 const loaded=await pdfjsLib.getDocument({data:await pdf.save()}).promise;await loaded.destroy();
             }),
-            stage('ocr','OCR em português pronto',getOcrWorker),
-            stage('ai','IA local pronta',()=>classifyWithLocalAi('Preparação da identificação de documentos escolares.'))
+            stage('ocr','OCR em português pronto',getOcrWorker)
         ];
         if(GM_getValue(APP.driveEndpointKey,'')&&GM_getValue(APP.driveTokenKey,'')){
             const row=document.createElement('li');row.dataset.boot='index';row.textContent='◌ Índice de alunos';overlay.querySelector('ul').append(row);
@@ -4062,9 +3941,8 @@
             }));
         }
         const results=await Promise.all(tasks);
-        clearInterval(progressTimer);
         if(generation!==state.bootGeneration)return;
-        if(results.every(Boolean)){overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('PDF, OCR e IA local prontos.','ok');updateProgress(0,'Sistema pronto');}
+        if(results.every(Boolean)){overlay.remove();el.app.inert=false;setBusy(false);setOcrStatus('PDF e OCR prontos.','ok');updateProgress(0,'Sistema pronto');}
         else{overlay.querySelector('.boot-retry').hidden=false;overlay.querySelector('.boot-message').textContent=failures.join(' • ')+' — Tente novamente ou continue com classificação manual.';}
     }
 

@@ -11,7 +11,7 @@ function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,configureLocalModelCache,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyWithLocalAi,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,combineDocumentEvidence,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -85,13 +85,10 @@ test('consulta e sincronização bloqueiam arquivo e identidade até terminar',(
   t.state[flag]=false;t.refreshSearchControls();assert.ok(Object.values(t.el).every(control=>!control.disabled));
  }
 });
-test('IA discordante ou indisponível exige revisão e não aplica automaticamente',()=>{
- const t=fixture();const rule={key:'ged_historico',confidence:.99,hits:[]};const text='Histórico escolar estudos realizados com carga horária e resultado final';
- assert.equal(t.combineDocumentEvidence(rule,null,text).autoApply,false);
- assert.equal(t.combineDocumentEvidence(rule,{key:'ged_certidao',score:.9,margin:.4},text).autoApply,false);
- assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.9,margin:.4},text).autoApply,true);
- assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.01},text).autoApply,false);
- assert.equal(t.combineDocumentEvidence(rule,{key:'ged_historico',score:.7,margin:.2},text).autoApply,false);
+test('OCR exige revisão de palavras-chave sem título ou estrutura inequívoca',()=>{
+ const t=fixture();const result=t.documentOcrSuggestion({key:'ged_historico',confidence:.99,hits:[]},'disciplinas notas');
+ assert.equal(result.autoApply,false);assert.equal(result.engine,'ocr');
+ assert.equal(t.documentOcrSuggestion(t.classifyText('HISTÓRICO ESCOLAR'),'HISTÓRICO ESCOLAR').autoApply,true);
 });
 
 test('campos característicos reconhecem documentos sem depender do título',()=>{
@@ -104,10 +101,10 @@ test('campos característicos reconhecem documentos sem depender do título',()=
   ['ged_oftalmo','Acuidade visual. Olho direito 20/20. Olho esquerdo 20/20.'],
   ['arquivo_cartao_sus','Sistema Único de Saúde. CNS 700 0000 0000 0000. Nome.']
  ];
- for(const [key,text] of samples){const rule=t.classifyText(text);assert.equal(rule.key,key);assert.equal(t.combineDocumentEvidence(rule,null,text).autoApply,true);}
- const mixed=t.classifyText(samples[1][1]+' '+samples[2][1]);assert.equal(mixed.multipleDocuments,true);assert.equal(t.combineDocumentEvidence(mixed,null,'').autoApply,false);
+ for(const [key,text] of samples){const rule=t.classifyText(text);assert.equal(rule.key,key);assert.equal(t.documentOcrSuggestion(rule,text).autoApply,true);}
+ const mixed=t.classifyText(samples[1][1]+' '+samples[2][1]);assert.equal(mixed.multipleDocuments,true);assert.equal(t.documentOcrSuggestion(mixed,'').autoApply,false);
  assert.notEqual(t.classifyText('Responsável. Nome do aluno. Data de nascimento. Telefone.').structureMatch,true);
- const personal=t.combineDocumentEvidence({key:'ged_rgcpf',confidence:.99},{key:'ged_rgcpf',score:.99,margin:.9},'Registro geral do cidadão com CPF e data de nascimento');assert.equal(personal.autoApply,false);assert.match(personal.reason,/responsável/);
+ const personal=t.documentOcrSuggestion({key:'ged_rgcpf',confidence:.99},'Registro geral do cidadão com CPF e data de nascimento');assert.equal(personal.autoApply,false);assert.match(personal.reason,/responsável/);
 });
 
 const httpCrypto={getRandomValues:array=>webcrypto.getRandomValues(array)};
@@ -134,14 +131,6 @@ test('HTTP: consulta e índice reutilizam o mesmo cache sem depender de digest',
  const response=await t.cachedStudentSearch({root:'FORMANDOS',query:'Jose',maxResults:150});
  assert.equal(JSON.parse(response.responseText).results[0].name,'JOSE TESTE');assert.equal(t.calls(),1);
 });
-test('HTTP: requisição de IA chega ao worker sem randomUUID',async()=>{
- let request;
- class FakeWorker{postMessage(data){request=data;this.onmessage({data:{id:data.id,result:{key:'ged_historico'}}});}}
- const t=fixture(undefined,{crypto:httpCrypto,Blob,Worker:FakeWorker});
- assert.equal((await t.classifyWithLocalAi('Histórico escolar')).key,'ged_historico');
- assert.match(request.id,/^[0-9a-f-]{36}$/);URL.revokeObjectURL(t.state.aiWorkerUrl);
-});
-
 test('falhas do Drive não exibem HTML e a requisição dispensa cookies Google',async()=>{
  let request;const t=fixture(undefined,{GM_xmlhttpRequest:opts=>{request=opts;opts.onload({status:404,responseText:'<!DOCTYPE html><script>enorme</script>'.repeat(500)});}});
  await assert.rejects(t.gmPostJson('https://script.google.com/macros/s/test/exec',{action:'ping',token:'test'}),error=>error.message.includes('404')&&error.message.length<200&&!error.message.includes('<'));
@@ -149,32 +138,6 @@ test('falhas do Drive não exibem HTML e a requisição dispensa cookies Google'
  assert.throws(()=>t.parseDriveResponse({responseText:'<html>erro</html>'}),error=>!error.message.includes('<html>'));
  assert.equal(t.normalizeDriveEndpoint('https://script.google.com/macros/u/1/s/test/exec?authuser=1'),'https://script.google.com/macros/s/test/exec');
  assert.throws(()=>t.normalizeDriveEndpoint('https://script.google.com/home/projects/test/edit'),/exec/);
-});
-test('IA sem Cache API nem IndexedDB continua sem forçar cache incompatível',async()=>{
- const t=fixture(),env={useBrowserCache:true};await t.configureLocalModelCache(env);
- assert.equal(env.useBrowserCache,false);assert.equal(env.useCustomCache,false);
-});
-test('IA usa Cache API quando disponível e não força cache se abertura for negada',async()=>{
- const env={};await fixture(undefined,{caches:{open:async()=>({})}}).configureLocalModelCache(env);assert.equal(env.useBrowserCache,true);
- await fixture(undefined,{caches:{open:async()=>{throw Error('SecurityError');}}}).configureLocalModelCache(env);
- assert.equal(env.useBrowserCache,false);assert.equal(env.useCustomCache,false);
-});
-test('IA em HTTP persiste modelo no IndexedDB e tolera falta de espaço',async()=>{
- const records=new Map();let writesFail=false;
- const db={close(){},createObjectStore(){},transaction(){
-  const tx={objectStore:()=>({
-   get(key){const req={result:records.get(key)};queueMicrotask(()=>tx.oncomplete());return req;},
-   put(value,key){const req={};queueMicrotask(()=>{if(writesFail){tx.error=Error('QuotaExceededError');tx.onabort();}else{records.set(key,value);tx.oncomplete();}});return req;}
-  })};return tx;
- }};
- const indexedDB={open(){const request={result:db};queueMicrotask(()=>request.onsuccess());return request;}};
- const t=fixture(undefined,{indexedDB,Response}),env={};await t.configureLocalModelCache(env);
- assert.equal(env.useBrowserCache,false);assert.equal(env.useCustomCache,true);
- assert.equal(await env.customCache.match('missing'),undefined);
- await env.customCache.put('model',new Response('modelo de teste',{headers:{'content-type':'application/octet-stream'}}));
- assert.equal(await (await env.customCache.match('model')).text(),'modelo de teste');
- const next={};await t.configureLocalModelCache(next);assert.equal(await (await next.customCache.match('model')).text(),'modelo de teste');
- writesFail=true;await env.customCache.put('other',new Response('sem espaço'));assert.equal(await env.customCache.match('other'),undefined);
 });
 test('seleção exige caixa e identidade atual, sem aceitar só nome digitado',()=>{
  const t=fixture();t.el.studentName={value:'ALUNO TESTE'};t.el.studentBirth={value:'01/01/2000'};t.el.archiveRoot={value:'PERMANENTE'};
@@ -191,9 +154,19 @@ test('lista única apresenta nomes específicos e mantém os códigos dos docume
  const html=fixture().makeDocumentOptions('ged_vacina');assert.ok(!html.includes('optgroup'));
  for(const name of ['RG/CPF Responsável','RG/CPF Aluno','Cartão de Vacina','Certidão de Nascimento','Tipo Sanguíneo'])assert.ok(html.includes(name));assert.match(html,/value="ged_vacina"[^>]*selected/);
 });
-test('títulos curtos valem mais que semântica genérica e folha com dois tipos exige revisão',()=>{
+test('OCR reconhece títulos curtos e folha com dois tipos exige revisão',()=>{
  const t=fixture();for(const [text,key] of [['CERTIDÃO DE NASCIMENTO','ged_certidao'],['CARTÃO DE VACINA','ged_vacina'],['TIPAGEM SANGUÍNEA','ged_sangue'],['HISTÓRICO ESCOLAR','ged_historico']]){
-  const result=t.combineDocumentEvidence(t.classifyText(text),{key:'arquivo_diversos',score:.4,margin:.1},text);assert.equal(result.key,key);assert.equal(result.autoApply,true);
+  const result=t.documentOcrSuggestion(t.classifyText(text),text);assert.equal(result.key,key);assert.equal(result.autoApply,true);
  }
- const both='CERTIDÃO DE NASCIMENTO e CARTÃO DE VACINA';const result=t.combineDocumentEvidence(t.classifyText(both),null,both);assert.equal(result.autoApply,false);assert.match(result.reason,/duplique/);
+ const both='CERTIDÃO DE NASCIMENTO e CARTÃO DE VACINA';const result=t.documentOcrSuggestion(t.classifyText(both),both);assert.equal(result.autoApply,false);assert.match(result.reason,/duplique/);
+});
+
+test('novos tipos: declaração vacinal é distinta de cartão e NIS avulso exige revisão',()=>{
+ const t=fixture();const html=t.makeDocumentOptions();
+ for(const name of ['NIS/CadÚnico','Declaração Vacinal','Atestados Médicos'])assert.ok(html.includes(name));
+ for(const [text,key] of [['COMPROVANTE DO CADASTRO ÚNICO','arquivo_nis'],['DECLARAÇÃO VACINAL','arquivo_declaracao_vacinal'],['Declaração de situação vacinal BCG Hepatite Pentavalente dose lote','arquivo_declaracao_vacinal'],['ATESTADOS MÉDICOS','arquivo_atestado_medico'],['ATESTADO MÉDICO','arquivo_atestado_medico'],['CARTÃO DE VACINA','ged_vacina']]){
+  const r=t.documentOcrSuggestion(t.classifyText(text),text);assert.equal(r.key,key);assert.equal(r.autoApply,true);
+ }
+ const text='Nome do aluno. NIS 12345678901';assert.equal(t.documentOcrSuggestion(t.classifyText(text),text).autoApply,false);
+ assert.ok(!source.includes('huggingface'));assert.ok(!source.includes('classifyWithLocalAi'));
 });
