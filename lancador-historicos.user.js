@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Lançador de Históricos
 // @namespace    http://tampermonkey.net/
-// @version      5.0.2
+// @version      5.1.0
 // @description  Módulo Ferramentas para lançar históricos escolares diretamente no SIGEDUCA com GUI integrada.
 // @author       Jhonatan Aquino; adaptação modular Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -23,7 +23,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '5.0.2',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '5.1.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/lancador-historicos.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/lancador-historicos.user.js'
     });
@@ -1153,10 +1153,11 @@ divCredit.innerHTML = `
 <section class="divseletor" id="lahEditor">
     <div class="lah-header">
         <div>
-            <h2>Lançador de Histórico GED</h2>
-            <p>Preencha os dados do histórico escolar nos campos abaixo.</p>
+            <span class="lah-eyebrow">GED · HISTÓRICO ESCOLAR</span>
+            <h2>Lançador de Históricos</h2>
+            <p>Organize os anos e as disciplinas, confira os dados e prepare o lançamento.</p>
         </div>
-        <span class="lah-badge">Módulo Ferramentas · versão 5.0</span>
+        <span class="lah-badge">v${ATUALIZACAO_SCRIPT.versao}</span>
     </div>
 
     <div class="lah-student">
@@ -1618,7 +1619,7 @@ function lahRenderDisciplina(ano, disciplina) {
             <td>
                 <div class="lah-discipline-actions">
                     <button type="button" class="lah-search-discipline ${selecionada ? 'is-change' : 'is-search'}" data-action="pesquisar-disciplina" data-year="${lahEscape(ano.id)}" data-row="${lahEscape(disciplina.id)}">
-                        <span aria-hidden="true">🔍</span> ${selecionada ? 'Alterar Disciplina' : 'Pesquisar Disciplina'}
+                        <span aria-hidden="true">🔍</span> ${selecionada ? 'Alterar' : 'Pesquisar'}
                     </button>
                 </div>
             </td>
@@ -1688,8 +1689,8 @@ function lahRenderAno(ano, indice) {
                         </select>
                     </label>
                     <label class="lah-col-3">
-                        Carga horária total (ou informe por disciplina)
-                        <input data-year="${lahEscape(ano.id)}" data-field="cargaTotal" value="${lahEscape(ano.cargaTotal)}" inputmode="numeric" pattern="[0-9]*" placeholder="Ex: 800">
+                        Carga horária total
+                        <input data-year="${lahEscape(ano.id)}" data-field="cargaTotal" value="${lahEscape(ano.cargaTotal)}" inputmode="numeric" pattern="[0-9]*" placeholder="Total ou por disciplina" title="Informe a carga total ou preencha a carga horária de cada disciplina">
                     </label>
                     <label class="lah-col-8">
                         Nome da escola
@@ -3505,252 +3506,106 @@ function adicionarEfeitoBrilhoFlexivel(containerSelector, options = {}) {
         const style = document.createElement('style');
         style.id = 'lah-modular-morph-style';
         style.textContent = `
-            /* Mantém o cabeçalho/menu nativo do SIGEDUCA e amplia a área útil. */
-            body.Form {
-                background:#fff !important;
-            }
+/* Interface integrada: preserva cabeçalho, navegação e controles nativos. */
+body.Form { background:#fff !important; }
+#TABLE1_MPAGE { width:min(1220px, calc(100% - 24px)) !important; max-width:100% !important; }
+#TABLE4[data-lah-native-hidden="1"] { display:none !important; }
+#lah-modular-host { display:block !important; width:100% !important; max-width:1180px; min-width:0; margin:12px auto 28px !important; padding:0 !important; color:#25374a; }
+#lah-modular-host, #lah-modular-host * { box-sizing:border-box; font-family:Verdana,Arial,sans-serif !important; }
+#lah-modular-host #containerLAH,
+#lah-modular-host #containerLAH.lah-panel-closed,
+#lah-modular-host #containerLAH.lah-panel-open {
+ display:block !important; position:static !important; inset:auto !important; width:100% !important; height:auto !important;
+ min-width:0 !important; min-height:0 !important; max-width:none !important; max-height:none !important;
+ margin:0 !important; padding:0 !important; overflow:visible !important; opacity:1 !important; visibility:visible !important;
+ clip-path:none !important; transform:none !important; pointer-events:auto !important; transition:none !important;
+ border:1px solid #c5d1dc !important; border-radius:5px !important; background:#fff !important; box-shadow:none !important;
+ backdrop-filter:none !important; -webkit-backdrop-filter:none !important; color:#25374a !important; text-align:left !important;
+}
+#exibirLAH { display:none !important; }
+html.lah-gui-aberta,html.lah-gui-aberta body { overflow:auto !important; }
+#lah-modular-host #containerLAH .divseletor { display:block; min-width:0 !important; min-height:0 !important; padding:0 20px 18px !important; text-align:left !important; }
+#lah-modular-host #containerLAH .lah-header { align-items:center !important; gap:16px; margin:0 -20px 18px !important; padding:18px 20px 16px; border-bottom:3px solid #145782; background:#f5f8fb; }
+#lah-modular-host #containerLAH .lah-eyebrow { display:block; margin-bottom:7px; color:#3b6481; font-size:10px; font-weight:700; letter-spacing:.5px; }
+#lah-modular-host #containerLAH .lah-header h2 { margin:0 0 7px !important; font-size:20px !important; font-weight:700 !important; color:#194665 !important; letter-spacing:0 !important; }
+#lah-modular-host #containerLAH .lah-header p { margin:0 !important; font-size:12px !important; line-height:1.6; color:#536575 !important; }
+#lah-modular-host #containerLAH .lah-muted, #lah-modular-host #containerLAH .lah-status { font-size:11px !important; line-height:1.6; color:#546576; }
+#lah-modular-host #containerLAH .lah-badge { padding:6px 9px !important; border:1px solid #ccd9e4 !important; border-radius:4px !important; background:#fff !important; color:#536575 !important; font-size:10px !important; white-space:nowrap; }
+#lah-modular-host #containerLAH label { font-size:11px !important; line-height:1.5; font-weight:700 !important; color:#394e60 !important; gap:6px; }
+#lah-modular-host #containerLAH input, #lah-modular-host #containerLAH select, #lah-modular-host #containerLAH textarea {
+ min-height:34px !important; min-width:0; border:1px solid #b6c5d1 !important; border-radius:4px !important;
+ padding:7px 9px !important; background:#fff !important; color:#23384a !important; font-size:12px !important; line-height:1.4; box-shadow:none !important;
+}
+#lah-modular-host #containerLAH textarea { min-height:64px !important; }
+#lah-modular-host #containerLAH :is(input,select,textarea):focus { border-color:#1f6595 !important; outline:2px solid #c7e0ef !important; outline-offset:1px; }
+#lah-modular-host #containerLAH button, #lah-modular-host #containerLAH .lah-button {
+ min-height:33px !important; border:1px solid #bdcbd7 !important; border-radius:4px !important; padding:7px 11px !important;
+ background:#fff !important; color:#34516a !important; font-size:11px !important; line-height:1.4; font-weight:700 !important; box-shadow:none !important;
+}
+#lah-modular-host #containerLAH button:hover:not(:disabled) { background:#edf4f9 !important; border-color:#7fa5be !important; color:#164f78 !important; }
+#lah-modular-host #containerLAH button:focus-visible { outline:2px solid #176496 !important; outline-offset:3px; }
+#lah-modular-host #containerLAH button:disabled { opacity:.45; cursor:not-allowed; }
+#lah-modular-host #containerLAH .lah-primary { background:#155b8b !important; border-color:#155b8b !important; color:#fff !important; }
+#lah-modular-host #containerLAH .lah-primary:hover:not(:disabled) { background:#10496f !important; color:#fff !important; }
+#lah-modular-host #containerLAH .lah-danger { color:#a03c36 !important; background:#fff !important; border-color:#ddc5c2 !important; }
+#lah-modular-host #containerLAH .lah-danger:hover:not(:disabled) { background:#fff1ef !important; color:#892c25 !important; border-color:#c99b95 !important; }
+#lah-modular-host #containerLAH .lah-student { padding:14px 16px !important; border:1px solid #cbdbe6 !important; border-left:4px solid #2775a5 !important; border-radius:4px !important; background:#f4f8fb !important; grid-template-columns:minmax(150px,190px) 1fr; align-items:center; gap:20px; box-shadow:none !important; }
+#lah-modular-host #containerLAH #lahStudentHint { line-height:1.7; font-size:12px !important; }
+#lah-modular-host #containerLAH .lah-toolbar { padding:14px 0; margin:0 !important; gap:8px; align-items:center; }
+#lah-modular-host #containerLAH #lahClearDraft { margin-left:auto; }
+#lah-modular-host #containerLAH .lah-year-card { margin:0 0 14px !important; border:1px solid #c5d1dc !important; border-radius:5px !important; background:#fff; box-shadow:none !important; }
+#lah-modular-host #containerLAH .lah-year-card.is-active { border-color:#729bb7 !important; }
+#lah-modular-host #containerLAH .lah-year-head, #lah-modular-host #containerLAH .lah-year-card.is-active .lah-year-head { padding:10px 13px !important; background:#edf3f7 !important; gap:12px; }
+#lah-modular-host #containerLAH .lah-year-toggle { border:0 !important; background:transparent !important; padding:3px 0 !important; min-width:0; text-align:left; }
+#lah-modular-host #containerLAH .lah-year-toggle:hover:not(:disabled) { background:transparent !important; }
+#lah-modular-host #containerLAH .lah-year-title strong { color:#194d70 !important; font-size:13px !important; }
+#lah-modular-host #containerLAH .lah-expand-label { font-size:10px; font-weight:400; color:#496c85; margin:0 12px; }
+#lah-modular-host #containerLAH .lah-year-actions { gap:6px; }
+#lah-modular-host #containerLAH .lah-year-body { padding:16px !important; gap:16px !important; }
+#lah-modular-host #containerLAH .lah-grid { gap:14px 16px; align-items:start; }
+#lah-modular-host #containerLAH .lah-grid > label { min-width:0; }
+#lah-modular-host #containerLAH .lah-subsection { padding-top:14px; border-top:1px solid #dbe4eb; }
+#lah-modular-host #containerLAH .lah-subsection-head h4 { color:#194d70; font-size:12px; }
+#lah-modular-host #containerLAH .lah-table-wrap { border:1px solid #cbd8e2 !important; border-radius:4px !important; box-shadow:none !important; overflow-x:auto; }
+#lah-modular-host #containerLAH .lah-disc-table { min-width:960px; table-layout:auto; }
+#lah-modular-host #containerLAH .lah-disc-table th { padding:10px 8px !important; background:#e8eff5 !important; color:#244962 !important; font-size:10px !important; line-height:1.4; border-bottom:1px solid #bdcdd9; }
+#lah-modular-host #containerLAH .lah-disc-table td { padding:7px !important; border-top:1px solid #e3eaf0 !important; }
+#lah-modular-host #containerLAH .lah-disc-table tbody tr:nth-child(even) { background:#f8fafc; }
+#lah-modular-host #containerLAH .lah-disc-table input { font-size:11px !important; min-height:33px !important; }
+#lah-modular-host #containerLAH .lah-disc-table :is(input[readonly],.lah-readonly) { background:#f4f7fa !important; border-color:#dce4ea !important; color:#43586a !important; }
+#lah-modular-host #containerLAH .lah-disc-table td:nth-child(2) { min-width:190px; }
+#lah-modular-host #containerLAH .lah-disc-table td:nth-child(3) { min-width:180px; }
+#lah-modular-host #containerLAH .lah-disc-table td:nth-child(4) { min-width:110px; }
+#lah-modular-host #containerLAH .lah-disc-table td:nth-child(5) { min-width:75px; }
+#lah-modular-host #containerLAH .lah-favorite-button { min-width:32px !important; width:32px; padding:2px !important; font-size:20px !important; color:#8a6818 !important; }
+#lah-modular-host #containerLAH .lah-favorite-button.is-favorite { background:#fff8e1 !important; border-color:#d8b85e !important; }
+#lah-modular-host #containerLAH .lah-remove-disc { min-width:32px; padding:5px 8px !important; }
+#lah-modular-host #containerLAH .lah-add-discipline { border-style:dashed !important; background:#f6fafc !important; color:#155b8b !important; }
+#lah-modular-host #containerLAH .lah-footer-actions { padding:15px 0 0; margin-top:5px !important; border-top:1px solid #d5dfe8; }
+#lah-modular-host #containerLAH #btnCarregarDados { padding:10px 20px !important; }
+#lah-modular-host #containerLAH .lah-validation { border-radius:4px !important; box-shadow:none !important; line-height:1.6; }
+#lah-modular-host #containerLAH .lah-settings-menu { border-radius:4px; box-shadow:0 6px 18px #213c5524; }
+#lah-modular-host #containerLAH .lah-modal-backdrop { position:fixed !important; background:#18324766; }
+#lah-modular-host #containerLAH .lah-modal { border-radius:6px; border:1px solid #a9bfd0; }
+#lah-modular-host #containerLAH .lah-modal-head { background:#f3f7fa; border-bottom:1px solid #ccdae5; }
+#lah-modular-host #containerLAH .divlog { position:static !important; width:auto !important; min-width:0 !important; min-height:0 !important; margin:0 !important; padding:10px 16px !important; transform:none !important; border:0 !important; border-radius:0 !important; background:#edf5fa !important; font-size:12px !important; line-height:1.5 !important; box-shadow:none !important; }
+#lah-modular-host #containerLAH .divlog:empty { display:none !important; }
+#lah-modular-host #containerLAH .divcarregando, #lah-modular-host #containerLAH .divbotoes, #lah-modular-host #containerLAH .divajuda { width:100% !important; max-width:none !important; }
+@media(max-width:760px) {
+ #TABLE1_MPAGE { width:100% !important; }
+ #lah-modular-host { margin:8px auto !important; }
+ #lah-modular-host #containerLAH .divseletor { padding:0 10px 12px !important; }
+ #lah-modular-host #containerLAH .lah-header { margin:0 -10px 12px !important; padding:14px 10px; flex-wrap:wrap; }
+ #lah-modular-host #containerLAH .lah-header h2 { font-size:17px !important; }
+ #lah-modular-host #containerLAH .lah-student { grid-template-columns:1fr; gap:10px; }
+ #lah-modular-host #containerLAH .lah-year-head { flex-wrap:wrap; }
+ #lah-modular-host #containerLAH .lah-year-toggle { flex-basis:100%; }
+ #lah-modular-host #containerLAH .lah-year-actions { flex-direction:row; }
+ #lah-modular-host #containerLAH .lah-year-body { padding:12px !important; }
+ #lah-modular-host #containerLAH #lahClearDraft { margin-left:0; }
+ #lah-modular-host #containerLAH .lah-footer-actions { flex-wrap:wrap; }
+}
 
-            #TABLE1_MPAGE {
-                width:min(1180px, calc(100vw - 18px)) !important;
-            }
-
-            /* A tela nativa continua viva no DOM, mas não aparece para o usuário. */
-            #TABLE4[data-lah-native-hidden="1"] {
-                display:none !important;
-            }
-
-            /* Host fora da região que o GeneXus redesenha. */
-            #lah-modular-host {
-                display:block !important;
-                width:min(1120px, calc(100vw - 34px)) !important;
-                margin:10px auto 26px !important;
-                padding:0 !important;
-                box-sizing:border-box !important;
-                font-family:Verdana,Arial,sans-serif !important;
-            }
-
-            #lah-modular-host,
-            #lah-modular-host * {
-                box-sizing:border-box;
-                font-family:Verdana,Arial,sans-serif !important;
-            }
-
-            /* Neutraliza completamente o antigo comportamento de janela flutuante. */
-            #lah-modular-host #containerLAH,
-            #lah-modular-host #containerLAH.lah-panel-closed,
-            #lah-modular-host #containerLAH.lah-panel-open {
-                display:block !important;
-                position:static !important;
-                inset:auto !important;
-                top:auto !important;
-                right:auto !important;
-                bottom:auto !important;
-                left:auto !important;
-                width:100% !important;
-                height:auto !important;
-                min-width:0 !important;
-                min-height:0 !important;
-                max-width:none !important;
-                max-height:none !important;
-                margin:0 !important;
-                padding:0 !important;
-                overflow:visible !important;
-                opacity:1 !important;
-                visibility:visible !important;
-                clip-path:none !important;
-                transform:none !important;
-                pointer-events:auto !important;
-                transition:none !important;
-                border:1px solid #9aa7b3 !important;
-                border-radius:0 !important;
-                background:#f7f7f7 !important;
-                box-shadow:none !important;
-                backdrop-filter:none !important;
-                -webkit-backdrop-filter:none !important;
-                color:#000 !important;
-                text-align:left !important;
-            }
-
-            /* O botão MAXIMIZAR/MINIMIZAR não faz sentido no modo integrado. */
-            #exibirLAH {
-                display:none !important;
-            }
-
-            html.lah-gui-aberta,
-            html.lah-gui-aberta body {
-                overflow:auto !important;
-            }
-
-            #lah-modular-host #containerLAH .divseletor {
-                display:block !important;
-                min-width:0 !important;
-                min-height:0 !important;
-                padding:12px 14px 16px !important;
-                text-align:left !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-header {
-                margin-bottom:10px !important;
-                align-items:center !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-header h2 {
-                margin:0 0 3px !important;
-                color:#000 !important;
-                font-size:11pt !important;
-                font-weight:bold !important;
-                letter-spacing:0 !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-header p,
-            #lah-modular-host #containerLAH .lah-muted,
-            #lah-modular-host #containerLAH .lah-status {
-                font-size:7pt !important;
-                color:#555 !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-badge {
-                padding:3px 6px !important;
-                border:1px solid #aaa !important;
-                border-radius:2px !important;
-                background:#fff !important;
-                color:#444 !important;
-                font-size:7pt !important;
-            }
-
-            #lah-modular-host #containerLAH label {
-                color:#000 !important;
-                font-size:8pt !important;
-                font-weight:bold !important;
-            }
-
-            #lah-modular-host #containerLAH input,
-            #lah-modular-host #containerLAH select,
-            #lah-modular-host #containerLAH textarea {
-                min-height:27px !important;
-                border:1px solid #999 !important;
-                border-radius:0 !important;
-                padding:4px 6px !important;
-                background:#fff !important;
-                color:#000 !important;
-                font-size:8pt !important;
-                box-shadow:none !important;
-            }
-
-            #lah-modular-host #containerLAH button,
-            #lah-modular-host #containerLAH .lah-button {
-                min-height:27px !important;
-                border:1px solid #777 !important;
-                border-radius:2px !important;
-                padding:4px 8px !important;
-                background:#efefef !important;
-                color:#000 !important;
-                font-size:8pt !important;
-                font-weight:bold !important;
-                box-shadow:none !important;
-            }
-
-            #lah-modular-host #containerLAH button:hover,
-            #lah-modular-host #containerLAH .lah-button:hover {
-                background:#e0e0e0 !important;
-                color:#000 !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-primary {
-                border-color:#044477 !important;
-                background:#065195 !important;
-                color:#fff !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-primary:hover {
-                background:#0b65ae !important;
-                color:#fff !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-student,
-            #lah-modular-host #containerLAH .lah-year-card,
-            #lah-modular-host #containerLAH .lah-table-wrap,
-            #lah-modular-host #containerLAH .lah-validation {
-                border-radius:0 !important;
-                box-shadow:none !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-student {
-                padding:9px !important;
-                border:1px solid #bbb !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-year-card {
-                margin:8px 0 !important;
-                border:1px solid #aaa !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-year-head,
-            #lah-modular-host #containerLAH .lah-year-card.is-active .lah-year-head {
-                padding:6px 8px !important;
-                background:#e7e7e7 !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-year-title strong {
-                font-size:9pt !important;
-                color:#000 !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-year-body {
-                gap:10px !important;
-                padding:10px !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-disc-table th {
-                padding:5px !important;
-                background:#065195 !important;
-                color:#fff !important;
-                font-size:7pt !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-disc-table td {
-                padding:4px !important;
-                border-top:1px solid #ddd !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-disc-table input {
-                min-height:25px !important;
-                font-size:7.5pt !important;
-            }
-
-            #lah-modular-host #containerLAH .divlog {
-                position:static !important;
-                width:auto !important;
-                min-width:0 !important;
-                min-height:0 !important;
-                margin:0 0 8px !important;
-                padding:6px !important;
-                transform:none !important;
-                border:1px solid #bbb !important;
-                border-radius:0 !important;
-                background:#fff !important;
-                font-size:8pt !important;
-                line-height:1.35 !important;
-                box-shadow:none !important;
-            }
-
-            #lah-modular-host #containerLAH .divcarregando,
-            #lah-modular-host #containerLAH .divbotoes,
-            #lah-modular-host #containerLAH .divajuda {
-                width:100% !important;
-                max-width:none !important;
-            }
-
-            #lah-modular-host #containerLAH .lah-modal-backdrop {
-                position:fixed !important;
-            }
-
-            @media (max-width:900px) {
-                #TABLE1_MPAGE,
-                #lah-modular-host {
-                    width:calc(100vw - 10px) !important;
-                }
-            }
         `;
 
         (document.head || document.documentElement).appendChild(style);

@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         SIGEDUCA - Menu Lateral de Ferramentas (Base)
 // @namespace    http://tampermonkey.net/
-// @version      2.7.0
+// @version      2.8.0
 // @description  Menu lateral independente para centralizar os userscripts instalados no SIGEDUCA.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
+// @match        *://sigeduca.seduc.mt.gov.br/grh/
+// @match        *://sigeduca.seduc.mt.gov.br/grh/*
 // @run-at       document-start
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -22,7 +24,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.7.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js'
     });
@@ -31,6 +33,54 @@
     // Evita criar uma segunda cópia do menu em iframes do SIGEDUCA.
     if (window.top !== window.self) {
         return;
+    }
+
+    // O caminho é a referência do módulo; o nome exibido pode ser diferente.
+    const MODULOS = Object.freeze({
+        ged: { id: 'ged', nome: 'GED', descricao: 'Gestão Escolar' },
+        grh: { id: 'grh', nome: 'GPE', descricao: 'Gestão de Pessoas' }
+    });
+    function detectarModulo(caminho) {
+        const id = /^\/([^/]+)(?:\/|$)/.exec(String(caminho || '').toLowerCase())?.[1];
+        return MODULOS[id] || null;
+    }
+    const MODULO_ATUAL = detectarModulo(window.location.pathname);
+    if (!MODULO_ATUAL) return;
+
+    // Preserva o azul original do GED e aplica a paleta do GPE à interface inteira.
+    const CORES_GPE = {
+        "#065195": "#9E242B",
+        "#005DA4": "#B52C34",
+        "#034478": "#7D1820",
+        "#DCEAF6": "#F5DFE1",
+        "#EEF5FB": "#FCF2F3",
+        "#1E2A33": "#342126",
+        "#64798A": "#80676B",
+        "#C8D8E5": "#E6C7CB",
+        "#F5F9FC": "#FCF7F8",
+        "#AFC7D9": "#D9AFB5",
+        "#E8F2F9": "#F8E8EB",
+        "#B8CDDD": "#DDB8BE",
+        "#29455A": "#5A2933",
+        "#AFC4D5": "#D5AFB6",
+        "#5E7689": "#895E69",
+        "#C8DCEB": "#EBC8CF",
+        "#17344A": "#4A1724",
+        "#71879A": "#9A717C",
+        "#7F9AAF": "#AF7F8C",
+        "#758B9C": "#9C7580",
+        "#d8e0eb": "#ebd8dc",
+        "#203047": "#47202C",
+        "#526178": "#78525F",
+        "#1958b7": "#9E242B",
+        "#85baff": "#E6A0AB",
+        "rgba(0, 55, 100, .24)": "rgba(130,25,35,.24)",
+        "rgba(0, 55, 100, .18)": "rgba(130,25,35,.18)",
+        "rgba(0, 81, 149, .09)": "rgba(130,25,35,.09)",
+        "rgba(0, 93, 164, .12)": "rgba(130,25,35,.12)"
+};
+    function corDoModulo(cor) {
+        return MODULO_ATUAL.id === 'grh' ? (CORES_GPE[cor] || cor) : cor;
     }
 
     // =====================================================================
@@ -97,7 +147,7 @@
     const CONFIG = {
         largura: 330,
         titulo: 'Ferramentas',
-        subtitulo: 'SIGEDUCA',
+        subtitulo: 'SIGEDUCA · ' + MODULO_ATUAL.nome,
         posicaoBotao: '45%',
         fecharAoNavegar: true,
         fecharComEscape: true,
@@ -208,8 +258,7 @@
             return null;
         }
 
-        // Aceita apenas HTTP/HTTPS do próprio SIGEDUCA e dentro de /ged/.
-        // Isso preserva a proteção da versão anterior.
+        // Cada módulo só registra links da sua própria área do SIGEDUCA.
         if (!/^https?:$/.test(u.protocol)) {
             console.warn('[Menu Lateral] Protocolo não permitido:', url);
             return null;
@@ -220,8 +269,9 @@
             return null;
         }
 
-        if (!u.pathname.toLowerCase().startsWith('/ged/')) {
-            console.warn('[Menu Lateral] A URL não pertence ao módulo GED:', url);
+        if (detectarModulo(u.pathname)?.id !== MODULO_ATUAL.id ||
+            (raw.modulo && raw.modulo !== MODULO_ATUAL.id)) {
+            console.warn('[Menu Lateral] A URL não pertence ao módulo atual:', url);
             return null;
         }
 
@@ -464,10 +514,16 @@
                 throw new Error('Ferramenta inválida no catálogo.');
             }
             ids.add(item.id);
+            // Compatibilidade: os catálogos antigos pertenciam somente ao GED.
+            const modulos = item.modulos === undefined ? ['ged'] : item.modulos;
+            if (!Array.isArray(modulos) || !modulos.length || modulos.length > 20 ||
+                modulos.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,19}$/.test(id))) {
+                throw new Error('Módulo inválido no catálogo.');
+            }
             const installUrl = new URL(item.arquivo, CATALOGO_URL).href;
             if (!validarURLAtualizacao(installUrl)) throw new Error('Endereço de instalação inválido.');
             return { id: item.id, titulo: item.titulo.trim(), descricao: item.descricao,
-                registros: [...item.registros], installUrl };
+                registros: [...item.registros], modulos: [...new Set(modulos)], installUrl };
         });
     }
 
@@ -480,7 +536,7 @@
             try {
                 const texto = await requisitarTexto(CATALOGO_URL);
                 if (texto.length > 200000) throw new Error('Catálogo grande demais.');
-                catalogo = validarCatalogo(JSON.parse(texto));
+                catalogo = validarCatalogo(JSON.parse(texto)).filter(item => item.modulos.includes(MODULO_ATUAL.id));
                 catalogoUltimaConsulta = Date.now();
                 catalogoEstado = 'pronto';
             } catch (_) {
@@ -507,7 +563,7 @@
         }
         if (!catalogoAberto && ferramentas.size) return;
         const secao = criarElemento('section', 'sig-grupo');
-        secao.appendChild(criarElemento('h3', 'sig-grupo-titulo', 'Central de ferramentas'));
+        secao.appendChild(criarElemento('h3', 'sig-grupo-titulo', 'Central de ferramentas · ' + MODULO_ATUAL.nome));
         const ajuda = criarElemento('p', 'sig-catalogo-ajuda',
             'Escolha uma ferramenta, confirme no Tampermonkey e recarregue o SigEduca. As novidades aparecem aqui automaticamente.');
         secao.appendChild(ajuda);
@@ -544,7 +600,7 @@
             secao.appendChild(card);
         }
         if (catalogoEstado === 'pronto' && !catalogo.length) {
-            secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda', 'Nenhuma ferramenta publicada no catálogo ainda.'));
+            secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda', 'Ainda não há ferramentas publicadas para ' + MODULO_ATUAL.nome + '. As novas ferramentas aparecerão aqui quando forem disponibilizadas.'));
         }
         secao.appendChild(criarElemento('p', 'sig-catalogo-ajuda',
             'Uma ferramenta desativada também pode aparecer como disponível. Confira o Tampermonkey antes de reinstalar.'));
@@ -781,10 +837,10 @@
 
         const style = document.createElement('style');
         style.textContent = `
-            .sig-catalogo-card { margin: 10px 0; padding: 12px; border: 1px solid #d8e0eb; border-radius: 10px; background: #fff; color: #203047; font-size: 13px; }
-            .sig-catalogo-ajuda { margin: 8px 0; font-size: 12px; line-height: 1.5; color: #526178; }
-            .sig-catalogo-instalar { border: 0; border-radius: 7px; background: #1958b7; color: white; padding: 8px 12px; font: inherit; cursor: pointer; }
-            .sig-catalogo-instalar:focus-visible { outline: 3px solid #85baff; outline-offset: 2px; }
+            .sig-catalogo-card { margin: 10px 0; padding: 12px; border: 1px solid ${corDoModulo("#d8e0eb")}; border-radius: 10px; background: #fff; color: ${corDoModulo("#203047")}; font-size: 13px; }
+            .sig-catalogo-ajuda { margin: 8px 0; font-size: 12px; line-height: 1.5; color: ${corDoModulo("#526178")}; }
+            .sig-catalogo-instalar { border: 0; border-radius: 7px; background: ${corDoModulo("#1958b7")}; color: white; padding: 8px 12px; font: inherit; cursor: pointer; }
+            .sig-catalogo-instalar:focus-visible { outline: 3px solid ${corDoModulo("#85baff")}; outline-offset: 2px; }
             .sig-catalogo-status { color: #176642; font-size: 12px; font-weight: 600; }
             :host {
                 all: initial;
@@ -798,15 +854,15 @@
 
             .sig-shell {
                 --sig-width: ${CONFIG.largura}px;
-                --sig-primary: #065195;
-                --sig-primary-hover: #005DA4;
-                --sig-primary-dark: #034478;
-                --sig-primary-soft: #DCEAF6;
-                --sig-primary-softer: #EEF5FB;
-                --sig-text: #1E2A33;
-                --sig-muted: #64798A;
-                --sig-line: #C8D8E5;
-                --sig-bg: #F5F9FC;
+                --sig-primary: ${corDoModulo("#065195")};
+                --sig-primary-hover: ${corDoModulo("#005DA4")};
+                --sig-primary-dark: ${corDoModulo("#034478")};
+                --sig-primary-soft: ${corDoModulo("#DCEAF6")};
+                --sig-primary-softer: ${corDoModulo("#EEF5FB")};
+                --sig-text: ${corDoModulo("#1E2A33")};
+                --sig-muted: ${corDoModulo("#64798A")};
+                --sig-line: ${corDoModulo("#C8D8E5")};
+                --sig-bg: ${corDoModulo("#F5F9FC")};
                 --sig-white: #FFFFFF;
 
                 position: fixed;
@@ -823,7 +879,7 @@
                 border: 0;
                 margin: 0;
                 padding: 0;
-                background: rgba(0, 55, 100, .24);
+                background: ${corDoModulo("rgba(0, 55, 100, .24)")};
                 opacity: 0;
                 visibility: hidden;
                 pointer-events: none;
@@ -849,8 +905,8 @@
                 flex-direction: column;
                 background: var(--sig-bg);
                 color: var(--sig-text);
-                border-right: 1px solid #AFC7D9;
-                box-shadow: 8px 0 32px rgba(0, 55, 100, .18);
+                border-right: 1px solid ${corDoModulo("#AFC7D9")};
+                box-shadow: 8px 0 32px ${corDoModulo("rgba(0, 55, 100, .18)")};
                 transform: translate3d(calc(-100% - 12px), 0, 0);
                 transition:
                     transform .30s cubic-bezier(.22, .61, .36, 1);
@@ -874,7 +930,7 @@
                 align-items: center;
                 justify-content: center;
                 gap: 0;
-                border: 1px solid #034478;
+                border: 1px solid ${corDoModulo("#034478")};
                 border-left: 0;
                 border-radius: 0 5px 5px 0;
                 margin: 0;
@@ -969,7 +1025,7 @@
                 padding: 22px 18px 18px;
                 color: #fff;
                 background:
-                    linear-gradient(180deg, #065195 0%, #005DA4 100%);
+                    linear-gradient(180deg, ${corDoModulo("#065195")} 0%, ${corDoModulo("#005DA4")} 100%);
                 overflow: hidden;
             }
 
@@ -1073,7 +1129,7 @@
                 align-items: center;
                 justify-content: center;
                 gap: 7px;
-                border: 1px solid #034478;
+                border: 1px solid ${corDoModulo("#034478")};
                 border-radius: 5px;
                 padding: 0 11px;
                 color: #FFFFFF;
@@ -1103,11 +1159,11 @@
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                border: 1px solid #AFC7D9;
+                border: 1px solid ${corDoModulo("#AFC7D9")};
                 border-radius: 5px;
                 padding: 0;
                 color: var(--sig-primary);
-                background: #F5F9FC;
+                background: ${corDoModulo("#F5F9FC")};
                 font-size: 16px;
                 line-height: 1;
                 cursor: pointer;
@@ -1117,7 +1173,7 @@
             }
 
             .sig-verificar:hover {
-                background: #E8F2F9;
+                background: ${corDoModulo("#E8F2F9")};
             }
 
             .sig-verificar.verificando {
@@ -1139,10 +1195,10 @@
                 flex: 0 0 auto;
                 margin: 8px 10px 0;
                 padding: 8px 9px;
-                border: 1px solid #B8CDDD;
+                border: 1px solid ${corDoModulo("#B8CDDD")};
                 border-radius: 5px;
-                color: #29455A;
-                background: #EEF5FB;
+                color: ${corDoModulo("#29455A")};
+                background: ${corDoModulo("#EEF5FB")};
                 font-size: 9.5px;
                 line-height: 1.45;
             }
@@ -1176,7 +1232,7 @@
                 overflow-y: auto;
                 padding: 12px 10px 22px;
                 scrollbar-width: thin;
-                scrollbar-color: #AFC4D5 transparent;
+                scrollbar-color: ${corDoModulo("#AFC4D5")} transparent;
             }
 
             .sig-conteudo::-webkit-scrollbar {
@@ -1189,13 +1245,13 @@
 
             .sig-conteudo::-webkit-scrollbar-thumb {
                 border-radius: 999px;
-                background: #AFC4D5;
+                background: ${corDoModulo("#AFC4D5")};
             }
 
             .sig-vazio {
                 margin: 28px 14px;
                 padding: 22px 18px;
-                border: 1px dashed #B8CDDD;
+                border: 1px dashed ${corDoModulo("#B8CDDD")};
                 border-radius: 12px;
                 background: #fff;
                 color: var(--sig-muted);
@@ -1215,7 +1271,7 @@
             .sig-grupo-titulo {
                 margin: 0;
                 padding: 8px 9px 6px;
-                color: #5E7689;
+                color: ${corDoModulo("#5E7689")};
                 font-size: 10px;
                 line-height: 1.2;
                 font-weight: 800;
@@ -1247,8 +1303,8 @@
 
             .sig-item:hover {
                 background: var(--sig-primary-softer);
-                border-color: #C8DCEB;
-                box-shadow: 0 2px 7px rgba(0, 81, 149, .09);
+                border-color: ${corDoModulo("#C8DCEB")};
+                box-shadow: 0 2px 7px ${corDoModulo("rgba(0, 81, 149, .09)")};
             }
 
             .sig-item:focus-visible {
@@ -1290,7 +1346,7 @@
 
             .sig-item-titulo {
                 overflow: hidden;
-                color: #17344A;
+                color: ${corDoModulo("#17344A")};
                 font-size: 13px;
                 line-height: 1.25;
                 font-weight: 700;
@@ -1332,14 +1388,14 @@
 
             .sig-item-verificando {
                 flex: 0 0 auto;
-                color: #71879A;
+                color: ${corDoModulo("#71879A")};
                 font-size: 8.5px;
                 white-space: nowrap;
             }
 
             .sig-item-seta {
                 flex: 0 0 auto;
-                color: #7F9AAF;
+                color: ${corDoModulo("#7F9AAF")};
                 font-size: 18px;
                 line-height: 1;
                 transform: translateY(-1px);
@@ -1350,7 +1406,7 @@
                 padding: 9px 14px;
                 border-top: 1px solid var(--sig-line);
                 background: #fff;
-                color: #758B9C;
+                color: ${corDoModulo("#758B9C")};
                 font-size: 9.5px;
                 line-height: 1.3;
                 text-align: center;

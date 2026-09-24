@@ -10,7 +10,7 @@ class Elemento {
   addEventListener(event, fn) { this.events[event] = fn; }
   setAttribute() {}
 }
-function menu(respond) {
+function menu(respond, modulo = 'ged') {
   let s = fs.readFileSync(path.join(__dirname, 'menu-ferramentas.user.js'), 'utf8');
   s = s.replace('    // Cria o painel assim que o <html> existir.', `
     refs = { aviso: { textContent: '', dataset: {}, classList: { add() {} } },
@@ -18,14 +18,14 @@ function menu(respond) {
     globalThis.testing = { compararVersoes, validarURLAtualizacao, verificarAtualizacoes,
         verificarAtualizacaoDaFerramenta, abrirAtualizacao, statusAtualizacoes,
         ferramentas, refs, ATUALIZACAO_BASE, validarCatalogo, carregarCatalogo,
-        ferramentaDetectada, renderizarCatalogo,
+        ferramentaDetectada, renderizarCatalogo, detectarModulo, sanitizarFerramenta, MODULO_ATUAL, corDoModulo,
         estadoCatalogo: () => ({ estado: catalogoEstado, itens: catalogo }) };
     return;
     // Cria o painel assim que o <html> existir.`);
   const opened = [];
-  const window = { addEventListener() {}, open: (...args) => opened.push(args) };
+  const window = { location: new URL('https://sigeduca.seduc.mt.gov.br/' + modulo + '/inicio.aspx'), addEventListener() {}, open: (...args) => opened.push(args) };
   window.top = window.self = window;
-  const context = { window, URL, console: { debug() {} }, setTimeout() {}, clearTimeout() {},
+  const context = { window, URL, console: { debug() {}, warn() {} }, setTimeout() {}, clearTimeout() {},
     document: { createElement: tag => new Elemento(tag) },
     requestAnimationFrame() {}, GM_info: { script: { version: '2.6.0' } },
     GM_xmlhttpRequest: respond };
@@ -133,7 +133,7 @@ test('novidade aparece pela atualização do catálogo sem modificar o menu; cli
   let chamadas = 0;
   const m = menu(o => { chamadas++; o.onload({ status: 200, responseText: JSON.stringify(resposta) }); });
   await m.carregarCatalogo();
-  assert.equal(m.estadoCatalogo().itens.length, 12);
+  assert.equal(m.estadoCatalogo().itens.length, 11);
   await m.carregarCatalogo();
   assert.equal(chamadas, 1);
   resposta.ferramentas.push({ id: 'nova', titulo: 'Nova ferramenta', descricao: 'Teste', arquivo: 'nova.user.js', registros: ['nova'] });
@@ -155,7 +155,7 @@ test('falha de catálogo mantém ferramentas instaladas e permite tentar novamen
   falha = true;
   await m.carregarCatalogo(true);
   assert.equal(m.estadoCatalogo().estado, 'erro');
-  assert.equal(m.estadoCatalogo().itens.length, 12);
+  assert.equal(m.estadoCatalogo().itens.length, 11);
   assert.ok(m.ferramentas.has('requerimentos'));
   falha = false;
   await m.carregarCatalogo(true);
@@ -169,10 +169,25 @@ test('primeira instalação exibe a central e botões que abrem o script correto
   const todos = [];
   function percorrer(el) { todos.push(el); el.children.forEach(percorrer); }
   percorrer(m.refs.conteudo);
-  assert.ok(todos.some(el => el.textContent === 'Central de ferramentas'));
+  assert.ok(todos.some(el => el.textContent === 'Central de ferramentas · GED'));
   const botoes = todos.filter(el => el.tag === 'button');
-  assert.equal(botoes.length, 12);
+  assert.equal(botoes.length, 11);
   botoes[0].events.click();
   assert.equal(m.opened[0][0], root + 'termos-compromisso.user.js');
   assert.equal(m.ferramentas.size, 0);
+});
+
+test('módulos isolam links, catálogo e cores automaticamente', async () => {
+ for(const id of ['ged','grh']) {
+ const m=menu(o=>o.onload({status:200,responseText:JSON.stringify(catalogoPublicado)}),id);
+ assert.equal(m.MODULO_ATUAL.nome,id==='ged'?'GED':'GPE');
+ assert.equal(m.corDoModulo('#065195'),id==='ged'?'#065195':'#9E242B');
+ assert.equal(m.detectarModulo('/gpo/inicio.aspx'),null);
+ const registro={id:'teste',titulo:'Teste',url:'pagina.aspx'};
+ assert.ok(m.sanitizarFerramenta(registro));
+ assert.equal(m.sanitizarFerramenta({...registro,url:id==='ged'?'/grh/teste.aspx':'/ged/teste.aspx'}),null);
+ assert.equal(m.sanitizarFerramenta({...registro,url:'https://example.com/'+id+'/teste.aspx'}),null);
+ await m.carregarCatalogo();
+ assert.equal(m.estadoCatalogo().itens.length,id==='ged'?11:0);
+ }
 });

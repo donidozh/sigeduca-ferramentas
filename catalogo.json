@@ -1,17 +1,144 @@
 {
   "formato": 1,
   "ferramentas": [
-    { "id": "termos-compromisso", "titulo": "Termos de Compromisso", "descricao": "Termos escolares, imagem com seleção por idade e compromisso de entrega de documentos pendentes.", "arquivo": "termos-compromisso.user.js", "registros": ["termos-compromisso"] },
-    { "id": "requerimentos", "titulo": "Requerimentos", "descricao": "Central de requerimentos de alunos.", "arquivo": "requerimentos.user.js", "registros": ["requerimentos"] },
-    { "id": "extrator-matriculas", "titulo": "Extrator de Matrículas", "descricao": "Consulta e extrai dados de matrículas em lote.", "arquivo": "extrator-matriculas.user.js", "registros": ["extrator-matriculas"] },
-    { "id": "analisador-dependencias", "titulo": "Analisador de Dependências", "descricao": "Analisa históricos e identifica dependências a pagar.", "arquivo": "analisador-dependencias.user.js", "registros": ["dependencias"] },
-    { "id": "lancador-historicos", "titulo": "Lançador de Históricos", "descricao": "Lançamento assistido de histórico escolar.", "arquivo": "lancador-historicos.user.js", "registros": ["lancador-historicos"] },
-    { "id": "acoes-lote-turmas", "titulo": "Ações em Lote", "descricao": "Ferramentas para processar ações por turma.", "arquivo": "acoes-lote-turmas.user.js", "registros": ["acoes-lote-turmas"] },
-    { "id": "consulta-alunos-lote", "titulo": "Consulta Alunos em Lote", "descricao": "Consulta vários alunos por nome ou CPF e exporta resultados.", "arquivo": "consulta-alunos-lote.user.js", "registros": ["consulta-alunos-lote"] },
-    { "id": "extrair-dados-pessoais", "titulo": "Extrair Dados Pessoais", "descricao": "Extrai dados pessoais, sociais e de matrícula.", "arquivo": "extrair-dados-pessoais.user.js", "registros": ["extrair-dados-pessoais"] },
-    { "id": "arquivo-digital-aluno", "titulo": "Arquivo Digital do Aluno", "descricao": "Consulta e envio de documentos. Requer configurar os serviços da escola.", "arquivo": "arquivo-digital-aluno.user.js", "registros": ["arquivo-digital-consulta", "arquivo-digital-upload"] },
-    { "id": "relacao-alunos-planilha", "titulo": "Relação de Alunos e Planilha", "descricao": "Listas por turma, planilha online e atestados. Configure seus links na engrenagem da ferramenta.", "arquivo": "relacao-alunos-planilha.user.js", "registros": [] },
-    { "id": "extrator-certidao", "titulo": "Extrator de Matrícula da Certidão", "descricao": "Extrai livro, folha e registro na tela de dados do aluno.", "arquivo": "extrator-certidao.user.js", "registros": [] },
-    { "id": "notas-fiscais-csv", "titulo": "Exportar Notas Fiscais", "descricao": "Exporta notas fiscais para CSV no módulo GPO.", "arquivo": "notas-fiscais-csv.user.js", "registros": [] }
+    {
+      "id": "termos-compromisso",
+      "titulo": "Termos de Compromisso",
+      "descricao": "Termos escolares, imagem com seleção por idade e compromisso de entrega de documentos pendentes.",
+      "arquivo": "termos-compromisso.user.js",
+      "registros": [
+        "termos-compromisso"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "requerimentos",
+      "titulo": "Requerimentos",
+      "descricao": "Central de requerimentos de alunos.",
+      "arquivo": "requerimentos.user.js",
+      "registros": [
+        "requerimentos"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "extrator-matriculas",
+      "titulo": "Extrator de Matrículas",
+      "descricao": "Consulta e extrai dados de matrículas em lote.",
+      "arquivo": "extrator-matriculas.user.js",
+      "registros": [
+        "extrator-matriculas"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "analisador-dependencias",
+      "titulo": "Analisador de Dependências",
+      "descricao": "Analisa históricos e identifica dependências a pagar.",
+      "arquivo": "analisador-dependencias.user.js",
+      "registros": [
+        "dependencias"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "lancador-historicos",
+      "titulo": "Lançador de Históricos",
+      "descricao": "Lançamento assistido de histórico escolar.",
+      "arquivo": "lancador-historicos.user.js",
+      "registros": [
+        "lancador-historicos"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "acoes-lote-turmas",
+      "titulo": "Ações em Lote",
+      "descricao": "Ferramentas para processar ações por turma.",
+      "arquivo": "acoes-lote-turmas.user.js",
+      "registros": [
+        "acoes-lote-turmas"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "consulta-alunos-lote",
+      "titulo": "Consulta Alunos em Lote",
+      "descricao": "Consulta vários alunos por nome ou CPF e exporta resultados.",
+      "arquivo": "consulta-alunos-lote.user.js",
+      "registros": [
+        "consulta-alunos-lote"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "extrair-dados-pessoais",
+      "titulo": "Extrair Dados Pessoais",
+      "descricao": "Extrai dados pessoais, sociais e de matrícula.",
+      "arquivo": "extrair-dados-pessoais.user.js",
+      "registros": [
+        "extrair-dados-pessoais"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "arquivo-digital-aluno",
+      "titulo": "Arquivo Digital do Aluno",
+      "descricao": "Consulta e envio de documentos. Requer configurar os serviços da escola.",
+      "arquivo": "arquivo-digital-aluno.user.js",
+      "registros": [
+        "arquivo-digital-consulta",
+        "arquivo-digital-upload"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "relacao-alunos-planilha",
+      "titulo": "Relação de Alunos e Planilha",
+      "descricao": "Listas por turma, planilha online e atestados. Configure seus links na engrenagem da ferramenta.",
+      "arquivo": "relacao-alunos-planilha.user.js",
+      "registros": [],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "extrator-certidao",
+      "titulo": "Extrator de Matrícula da Certidão",
+      "descricao": "Extrai livro, folha e registro na tela de dados do aluno.",
+      "arquivo": "extrator-certidao.user.js",
+      "registros": [],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
+      "id": "notas-fiscais-csv",
+      "titulo": "Exportar Notas Fiscais",
+      "descricao": "Exporta notas fiscais para CSV no módulo GPO.",
+      "arquivo": "notas-fiscais-csv.user.js",
+      "registros": [],
+      "modulos": [
+        "gpo"
+      ]
+    }
   ]
 }

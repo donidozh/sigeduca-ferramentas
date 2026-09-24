@@ -77,7 +77,8 @@ Não é necessário criar uma GitHub Release para distribuir a atualização: ne
   "titulo": "Nova ferramenta",
   "descricao": "Explique brevemente o que ela faz.",
   "arquivo": "nova-ferramenta.user.js",
-  "registros": ["id-usado-no-registro-do-menu"]
+  "registros": ["id-usado-no-registro-do-menu"],
+  "modulos": ["ged"]
 }
 ```
 
@@ -93,3 +94,11 @@ A Relação de Alunos precisa dos seus próprios links de planilha e Apps Script
 A automação de turmas em sigeduca-automatico é um projeto separado e não faz parte desta distribuição. As bibliotecas externas continuam sendo carregadas pelos @require originais.
 
 [Referência de atualização do Tampermonkey](https://www.tampermonkey.net/documentation.php#meta:updateURL).
+
+## GED e Gestão de Pessoas
+
+O menu 2.8.0 identifica o módulo pelo endereço: `/ged` exibe GED em azul; `/grh` exibe GPE em vermelho. O catálogo e os links registrados são filtrados pelo módulo atual. Ainda não há ferramentas GPE publicadas.
+
+Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu ainda não é executado no GPO. Categorias serão definidas posteriormente.
+
+O Lançador de Históricos 5.1.0 usa um painel mais próximo do GED, com cabeçalho azul, campos e ações organizados e tabela com rolagem horizontal em telas menores. A lógica de lançamento foi preservada.
