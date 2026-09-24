@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Menu Lateral de Ferramentas (Base)
 // @namespace    http://tampermonkey.net/
-// @version      2.8.2
+// @version      2.8.3
 // @description  Menu lateral independente para centralizar os userscripts instalados no SIGEDUCA.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/
@@ -26,7 +26,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.2',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.3',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js'
     });
@@ -879,6 +879,10 @@
             .sig-catalogo-status { color: #176642; font-size: 12px; font-weight: 600; }
             :host {
                 all: initial;
+            }
+
+            @media print {
+                :host, .sig-shell { display: none !important; visibility: hidden !important; }
             }
 
             *,
