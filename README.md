@@ -3,6 +3,16 @@
 Userscripts de Elder Martins para uso com o Tampermonkey.
 
 <a id="instalacao"></a>
+## Organização por módulo
+
+- [GED — Gestão Escolar](ged/): ferramentas usadas em `/ged`, menu azul.
+- [GPE — Gestão de Pessoas](gpe/): pasta para as futuras ferramentas usadas em `/grh`, menu vermelho.
+- [GPO](gpo/): exportador de notas fiscais, menu laranja.
+
+O menu base e o catálogo ficam na raiz. As ferramentas ficam exclusivamente nas pastas de seus módulos. Os endereços antigos da raiz foram removidos. Quem instalou antes da reorganização deve atualizar o menu para 2.8.1 e reinstalar as ferramentas pela central uma vez para receber os novos endereços de atualização.
+
+**Atualize o menu para 2.8.1** para ler os novos caminhos do catálogo.
+
 ## Instalação
 
 1. Instale o [Tampermonkey](https://www.tampermonkey.net/) no navegador e habilite a execução de userscripts conforme as instruções da extensão.
@@ -17,18 +27,18 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Ferramenta | Instalação | Onde aparece |
 | --- | --- | --- |
 | Menu Lateral de Ferramentas (Base) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js) | Menu Ferramentas |
-| Termos de Compromisso | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/termos-compromisso.user.js) | Menu Ferramentas |
-| Requerimentos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/requerimentos.user.js) | Menu Ferramentas |
-| Extrator de Matrículas | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/extrator-matriculas.user.js) | Menu Ferramentas |
-| Analisador de Dependências Integrado | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/analisador-dependencias.user.js) | Menu Ferramentas |
-| Lançador de Históricos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/lancador-historicos.user.js) | Menu Ferramentas |
-| Ações em Lote (Turmas) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/acoes-lote-turmas.user.js) | Menu Ferramentas |
-| Consulta Alunos em Lote | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/consulta-alunos-lote.user.js) | Menu Ferramentas |
-| Extrair Dados Pessoais | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/extrair-dados-pessoais.user.js) | Menu Ferramentas |
-| Arquivo Digital do Aluno | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/arquivo-digital-aluno.user.js) | Menu Ferramentas |
-| Relação de Alunos e Planilha Online - Por Turma (Com Atestados) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/relacao-alunos-planilha.user.js) | Tela específica |
-| Extrator de Matrícula Certidão | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/extrator-certidao.user.js) | Tela específica |
-| Exportar notas fiscais para CSV | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/notas-fiscais-csv.user.js) | Tela específica |
+| Termos de Compromisso | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/termos-compromisso.user.js) | Menu Ferramentas |
+| Requerimentos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/requerimentos.user.js) | Menu Ferramentas |
+| Extrator de Matrículas | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrator-matriculas.user.js) | Menu Ferramentas |
+| Analisador de Dependências Integrado | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/analisador-dependencias.user.js) | Menu Ferramentas |
+| Lançador de Históricos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/lancador-historicos.user.js) | Menu Ferramentas |
+| Ações em Lote (Turmas) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js) | Menu Ferramentas |
+| Consulta Alunos em Lote | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-alunos-lote.user.js) | Menu Ferramentas |
+| Extrair Dados Pessoais | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrair-dados-pessoais.user.js) | Menu Ferramentas |
+| Arquivo Digital do Aluno | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js) | Menu Ferramentas |
+| Relação de Alunos e Planilha Online - Por Turma (Com Atestados) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/relacao-alunos-planilha.user.js) | Tela específica |
+| Extrator de Matrícula Certidão | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrator-certidao.user.js) | Tela específica |
+| Exportar notas fiscais para CSV | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpo/notas-fiscais-csv.user.js) | Tela específica |
 
 O Arquivo Digital registra duas entradas no menu (consulta e upload), mas é um único script. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
 
@@ -58,7 +68,7 @@ Testes do módulo: `node termos-compromisso.test.cjs`. Interface e documentos fo
 
 ## Como liberar uma nova versão
 
-1. Edite o arquivo .user.js correspondente.
+1. Edite o arquivo .user.js correspondente na pasta do módulo.
 2. Aumente o número no cabeçalho @version, por exemplo de 3.0.1 para 3.0.2. Mantenha @name, @namespace e os endereços @updateURL / @downloadURL.
 3. Confira o código com Node.js: `node --check nome-do-script.user.js`. Teste a ferramenta no SigEduca.
 4. Envie o arquivo atualizado para a branch **main** deste repositório. O commit na main é a liberação para os usuários. Use uma branch separada para testes.
@@ -68,7 +78,7 @@ Não é necessário criar uma GitHub Release para distribuir a atualização: ne
 
 ## Como publicar uma ferramenta nova na central
 
-1. Publique o novo arquivo `.user.js` na raiz da `main`, com nome estável, por exemplo `nova-ferramenta.user.js`. Configure os metadados `@version`, `@updateURL` e `@downloadURL`, como nos scripts existentes.
+1. Publique o novo arquivo `.user.js` na pasta do módulo da `main`, com nome estável, por exemplo `nova-ferramenta.user.js`. Configure os metadados `@version`, `@updateURL` e `@downloadURL`, como nos scripts existentes.
 2. Acrescente uma entrada à lista `ferramentas` de `catalogo.json`:
 
 ```json
@@ -76,7 +86,7 @@ Não é necessário criar uma GitHub Release para distribuir a atualização: ne
   "id": "nova-ferramenta",
   "titulo": "Nova ferramenta",
   "descricao": "Explique brevemente o que ela faz.",
-  "arquivo": "nova-ferramenta.user.js",
+  "arquivo": "ged/nova-ferramenta.user.js",
   "registros": ["id-usado-no-registro-do-menu"],
   "modulos": ["ged"]
 }
@@ -99,6 +109,7 @@ A automação de turmas em sigeduca-automatico é um projeto separado e não faz
 
 O menu 2.8.0 identifica o módulo pelo endereço: `/ged` exibe GED em azul; `/grh` exibe GPE em vermelho. O catálogo e os links registrados são filtrados pelo módulo atual. Ainda não há ferramentas GPE publicadas.
 
-Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu ainda não é executado no GPO. Categorias serão definidas posteriormente.
+Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu também identifica `/gpo` e usa laranja nessa área. Categorias serão definidas posteriormente.
 
 O Lançador de Históricos 5.1.0 usa um painel mais próximo do GED, com cabeçalho azul, campos e ações organizados e tabela com rolagem horizontal em telas menores. A lógica de lançamento foi preservada.
+

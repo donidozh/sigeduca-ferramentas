@@ -33,7 +33,7 @@ function menu(respond, modulo = 'ged') {
   return { ...context.testing, opened };
 }
 test('todos os scripts mantêm identidade e URLs instaláveis', () => {
-  const files = fs.readdirSync(__dirname).filter(f => f.endsWith('.user.js'));
+  const files = ['menu-ferramentas.user.js', ...catalogoPublicado.ferramentas.map(t => t.arquivo)];
   assert.equal(files.length, 13);
   const identities = new Set();
   for (const file of files) {
@@ -116,7 +116,7 @@ test('catálogo cobre todas as ferramentas, com arquivos existentes e instalaç�
   assert.equal(itens.length, 12);
   for (const item of itens) {
     assert.ok(item.installUrl.startsWith(root));
-    assert.ok(fs.existsSync(path.join(__dirname, new URL(item.installUrl).pathname.split('/').pop())));
+    assert.ok(fs.existsSync(path.join(__dirname, item.installUrl.slice(root.length))));
   }
   assert.equal(new Set(itens.map(item => item.installUrl)).size, 12);
 });
@@ -173,7 +173,7 @@ test('primeira instalação exibe a central e botões que abrem o script correto
   const botoes = todos.filter(el => el.tag === 'button');
   assert.equal(botoes.length, 11);
   botoes[0].events.click();
-  assert.equal(m.opened[0][0], root + 'termos-compromisso.user.js');
+  assert.equal(m.opened[0][0], root + 'ged/termos-compromisso.user.js');
   assert.equal(m.ferramentas.size, 0);
 });
 
@@ -182,7 +182,7 @@ test('módulos isolam links, catálogo e cores automaticamente', async () => {
  const m=menu(o=>o.onload({status:200,responseText:JSON.stringify(catalogoPublicado)}),id);
  assert.equal(m.MODULO_ATUAL.nome,id==='ged'?'GED':'GPE');
  assert.equal(m.corDoModulo('#065195'),id==='ged'?'#065195':'#9E242B');
- assert.equal(m.detectarModulo('/gpo/inicio.aspx'),null);
+ assert.equal(m.detectarModulo('/outro/inicio.aspx'),null);
  const registro={id:'teste',titulo:'Teste',url:'pagina.aspx'};
  assert.ok(m.sanitizarFerramenta(registro));
  assert.equal(m.sanitizarFerramenta({...registro,url:id==='ged'?'/grh/teste.aspx':'/ged/teste.aspx'}),null);
@@ -190,4 +190,23 @@ test('módulos isolam links, catálogo e cores automaticamente', async () => {
  await m.carregarCatalogo();
  assert.equal(m.estadoCatalogo().itens.length,id==='ged'?11:0);
  }
+});
+
+test('ferramentas ficam somente nas pastas e rejeitam caminhos indevidos', () => {
+ for(const item of catalogoPublicado.ferramentas) {
+ assert.match(item.arquivo,/^(ged|gpe|gpo)\//);
+ assert.ok(!fs.existsSync(path.join(__dirname,path.basename(item.arquivo))));
+ }
+ const m=menu(()=>{});
+ for(const arquivo of ['ged/../x.user.js','ged/a/b.user.js','gpe/../../x.user.js','outro/x.user.js']) assert.throws(()=>m.validarCatalogo({formato:1,ferramentas:[{...catalogoPublicado.ferramentas[0],arquivo}]}));
+});
+
+test('GPO usa laranja e recebe somente seu catálogo', async () => {
+ const m=menu(o=>o.onload({status:200,responseText:JSON.stringify(catalogoPublicado)}),'gpo');
+ assert.equal(m.MODULO_ATUAL.nome,'GPO');
+ assert.equal(m.corDoModulo('#065195'),'#A94708');
+ await m.carregarCatalogo();
+ assert.equal(m.estadoCatalogo().itens.length,1);
+ assert.equal(m.estadoCatalogo().itens[0].id,'notas-fiscais-csv');
+ assert.equal(m.sanitizarFerramenta({id:'x',titulo:'Teste',url:'/ged/inicio.aspx'}),null);
 });

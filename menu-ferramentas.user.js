@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         SIGEDUCA - Menu Lateral de Ferramentas (Base)
 // @namespace    http://tampermonkey.net/
-// @version      2.8.0
+// @version      2.8.1
 // @description  Menu lateral independente para centralizar os userscripts instalados no SIGEDUCA.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
 // @match        *://sigeduca.seduc.mt.gov.br/grh/
 // @match        *://sigeduca.seduc.mt.gov.br/grh/*
+// @match        *://sigeduca.seduc.mt.gov.br/gpo/
+// @match        *://sigeduca.seduc.mt.gov.br/gpo/*
 // @run-at       document-start
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -24,7 +26,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.1',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js'
     });
@@ -38,7 +40,8 @@
     // O caminho é a referência do módulo; o nome exibido pode ser diferente.
     const MODULOS = Object.freeze({
         ged: { id: 'ged', nome: 'GED', descricao: 'Gestão Escolar' },
-        grh: { id: 'grh', nome: 'GPE', descricao: 'Gestão de Pessoas' }
+        grh: { id: 'grh', nome: 'GPE', descricao: 'Gestão de Pessoas' },
+        gpo: { id: 'gpo', nome: 'GPO', descricao: 'GPO' }
     });
     function detectarModulo(caminho) {
         const id = /^\/([^/]+)(?:\/|$)/.exec(String(caminho || '').toLowerCase())?.[1];
@@ -79,7 +82,39 @@
         "rgba(0, 81, 149, .09)": "rgba(130,25,35,.09)",
         "rgba(0, 93, 164, .12)": "rgba(130,25,35,.12)"
 };
+    const CORES_GPO = {
+        "#065195": "#A94708",
+        "#005DA4": "#BD520A",
+        "#034478": "#813604",
+        "#DCEAF6": "#F8E4D2",
+        "#EEF5FB": "#FFF5EB",
+        "#1E2A33": "#392C21",
+        "#64798A": "#806C59",
+        "#C8D8E5": "#E6D1BA",
+        "#F5F9FC": "#FFFAF4",
+        "#AFC7D9": "#D9BE9F",
+        "#E8F2F9": "#F9EAD8",
+        "#B8CDDD": "#DDC6AA",
+        "#29455A": "#5A4029",
+        "#AFC4D5": "#D5BDA2",
+        "#5E7689": "#89705E",
+        "#C8DCEB": "#EBD7BD",
+        "#17344A": "#4A3017",
+        "#71879A": "#9A826B",
+        "#7F9AAF": "#AF967B",
+        "#758B9C": "#9C846C",
+        "#d8e0eb": "#EBDFCD",
+        "#203047": "#473420",
+        "#526178": "#786652",
+        "#1958b7": "#A94708",
+        "#85baff": "#E9B57C",
+        "rgba(0, 55, 100, .24)": "rgba(140,70,10,.24)",
+        "rgba(0, 55, 100, .18)": "rgba(140,70,10,.18)",
+        "rgba(0, 81, 149, .09)": "rgba(140,70,10,.09)",
+        "rgba(0, 93, 164, .12)": "rgba(140,70,10,.12)"
+};
     function corDoModulo(cor) {
+        if (MODULO_ATUAL.id === "gpo") return CORES_GPO[cor] || cor;
         return MODULO_ATUAL.id === 'grh' ? (CORES_GPE[cor] || cor) : cor;
     }
 
@@ -508,7 +543,7 @@
             if (!item || typeof item.id !== 'string' || !/^[a-z0-9-]{1,80}$/.test(item.id) || ids.has(item.id) ||
                 typeof item.titulo !== 'string' || !item.titulo.trim() || item.titulo.length > 120 ||
                 typeof item.descricao !== 'string' || item.descricao.length > 500 ||
-                typeof item.arquivo !== 'string' || !/^[a-z0-9-]+\.user\.js$/.test(item.arquivo) ||
+                typeof item.arquivo !== 'string' || !/^(?:(?:ged|gpe|gpo)\/)?[a-z0-9-]+\.user\.js$/.test(item.arquivo) ||
                 !Array.isArray(item.registros) || item.registros.length > 20 ||
                 item.registros.some(id => typeof id !== 'string' || !/^[a-z0-9-]{1,80}$/.test(id))) {
                 throw new Error('Ferramenta inválida no catálogo.');
@@ -1309,7 +1344,7 @@
 
             .sig-item:focus-visible {
                 border-color: var(--sig-primary-hover);
-                box-shadow: 0 0 0 3px rgba(0,93,164,.12);
+                box-shadow: 0 0 0 3px ${corDoModulo("rgba(0, 93, 164, .12)")};
             }
 
             .sig-item:active {
