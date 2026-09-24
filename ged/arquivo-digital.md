@@ -1,4 +1,6 @@
-# Arquivo Digital 0.10.1
+# Arquivo Digital 0.10.2
+
+A versão 0.10.2 usa IndexedDB para guardar o modelo quando a Cache API está indisponível, como em HTTP. Se o armazenamento for recusado ou estiver cheio, o modelo ainda pode ser usado, mas poderá precisar de novo download. As chamadas ao Web App usam a chave configurada, sem cookies de sessões Google. Erros HTTP aparecem como mensagens curtas, sem despejar páginas HTML na interface.
 
 A versão 0.10.1 corrige a inicialização da IA, a consulta e a identificação dos arquivos quando `crypto.randomUUID` e `crypto.subtle` não estão disponíveis (como em páginas HTTP). A tela de carregamento preserva a causa de cada falha, em vez de exibir somente uma mensagem genérica.
 

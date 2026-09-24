@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.10.1
+// @version      0.10.2
 // @description  Arquivo Digital modular com Consulta e Upload; pesquisa de alunos diretamente no Google Sheets, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.10.1',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.10.2',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.10.1'
+            versao: '0.10.2'
         },
         {
             id: 'arquivo-digital-upload',
@@ -65,7 +65,7 @@
             ordem: 31,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.10.1'
+            versao: '0.10.2'
         }
     ]);
 
@@ -88,7 +88,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.10.1',
+        version: '0.10.2',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -2932,6 +2932,9 @@
             return;
         }
 
+        let validatedEndpoint;
+        try{validatedEndpoint=normalizeDriveEndpoint(endpoint);}catch(error){alert(error.message);return;}
+
         const currentToken = GM_getValue(APP.driveTokenKey, '');
         const token = prompt(
             'Cole a CHAVE DE ACESSO (API_TOKEN) definida no Google Apps Script.\n\nEla funciona como senha do Arquivo Digital.',
@@ -2939,7 +2942,7 @@
         );
         if (token === null) return;
 
-        GM_setValue(APP.driveEndpointKey, endpoint.trim());
+        GM_setValue(APP.driveEndpointKey, validatedEndpoint);
         GM_setValue(APP.driveTokenKey, token.trim());
         atualizarDriveStatus();
 
@@ -2981,7 +2984,7 @@
         try {
             return JSON.parse(response.responseText || '{}');
         } catch {
-            throw new Error(`Resposta inválida do Drive: ${String(response.responseText || '').slice(0, 250)}`);
+            throw new Error('O Google retornou uma página em vez dos dados. Confira a URL /exec em Configurar Drive e a implantação do serviço.');
         }
     }
 
@@ -3107,10 +3110,25 @@
         if (!endpoint) throw new Error('Endpoint do Google Drive não configurado.');
         if (!token) throw new Error('Chave de acesso do Google Drive não configurada.');
 
-        return gmPostJson(endpoint, {
+        return gmPostJson(normalizeDriveEndpoint(endpoint), {
             ...data,
             token
         });
+    }
+
+    function normalizeDriveEndpoint(value) {
+        let url;try{url=new URL(String(value).trim());}catch(_){throw new Error('Informe a URL /exec da implantação em Configurar Drive.');}
+        const match=url.pathname.match(/^\/macros\/(?:u\/\d+\/)?s\/([A-Za-z0-9_-]+)\/exec\/?$/);
+        if(url.protocol!=='https:'||url.hostname!=='script.google.com'||url.port||url.username||url.password||!match)
+            throw new Error('Use a URL do App da Web terminada em /exec, disponível em Apps Script → Implantar → Gerenciar implantações.');
+        return 'https://script.google.com/macros/s/'+match[1]+'/exec';
+    }
+
+    function driveHttpError(status) {
+        if(status===404)return 'Serviço do Drive não encontrado (HTTP 404). Confira a URL /exec em Configurar Drive e se a implantação continua ativa.';
+        if(status===401||status===403)return `Acesso ao serviço do Drive recusado (HTTP ${status}). Confira a implantação e suas permissões.`;
+        if(status===429)return 'O Google limitou as solicitações. Aguarde um pouco e tente novamente.';
+        return `Falha no serviço do Drive (HTTP ${Number(status)||0}). Tente novamente em instantes.`;
     }
 
     function gmPostJson(url, data) {
@@ -3118,12 +3136,13 @@
             GM_xmlhttpRequest({
                 method: 'POST',
                 url,
+                anonymous: true,
                 headers: { 'Content-Type': 'application/json;charset=UTF-8' },
                 data: JSON.stringify(data),
                 timeout: 180_000,
                 onload: response => {
                     if (response.status >= 200 && response.status < 400) resolve(response);
-                    else reject(new Error(`Endpoint HTTP ${response.status}: ${response.responseText || response.statusText}`));
+                    else reject(new Error(driveHttpError(response.status)));
                 },
                 onerror: () => reject(new Error('Falha de conexão com o endpoint do Google Drive.')),
                 ontimeout: () => reject(new Error('Tempo excedido no endpoint do Google Drive.'))
@@ -3731,6 +3750,46 @@
     }
 
 
+    async function configureLocalModelCache(env) {
+        env.useBrowserCache=false;env.useCustomCache=false;
+        try{
+            if(typeof caches!=='undefined'){await caches.open('transformers-cache');env.useBrowserCache=true;return;}
+        }catch(_){/* Cache API bloqueada: tenta armazenamento compatível com HTTP. */}
+        if(typeof indexedDB==='undefined')return;
+        let db;
+        try{
+            db=await new Promise((resolve,reject)=>{
+                const request=indexedDB.open('sigeduca-modelos-ia',1);
+                request.onupgradeneeded=()=>request.result.createObjectStore('files');
+                request.onsuccess=()=>resolve(request.result);
+                request.onerror=()=>reject(request.error);
+                request.onblocked=()=>reject(new Error('Armazenamento de modelos ocupado.'));
+            });
+        }catch(_){return;}
+        db.onversionchange=()=>db.close();
+        const transact=(mode,key,value)=>new Promise((resolve,reject)=>{
+            const tx=db.transaction('files',mode),store=tx.objectStore('files');
+            const request=mode==='readonly'?store.get(key):store.put(value,key);
+            tx.oncomplete=()=>resolve(request.result);
+            tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+        });
+        env.customCache={
+            async match(key){
+                try{const saved=await transact('readonly',String(key));return saved?new Response(saved.body,{status:200,headers:saved.headers}):undefined;}
+                catch(_){return undefined;}
+            },
+            async put(key,response){
+                try{
+                    if(response.status!==200)return;
+                    const copy=response.clone(),body=await copy.arrayBuffer();
+                    const headers={};for(const name of ['content-type','content-length']){const value=copy.headers.get(name);if(value)headers[name]=value;}
+                    await transact('readwrite',String(key),{body,headers});
+                }catch(_){/* Falta de espaço não impede usar o modelo já baixado. */}
+            }
+        };
+        env.useCustomCache=true;
+    }
+
     function localAiWorkerProgram() {
         let extractor, referenceVectors, referenceKeys;
         self.onmessage = async ({data}) => {
@@ -3738,7 +3797,7 @@
                 if (!extractor) {
                     const {pipeline,env} = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
                     env.allowLocalModels = false;
-                    env.useBrowserCache = true;
+                    await configureLocalModelCache(env);
                     env.backends.onnx.wasm.numThreads = 1;
                     extractor = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{
                         dtype:'q8',device:'wasm',revision:'2c4055b12046f11709e9df2c122e59ffbdc2f900',
@@ -3789,7 +3848,7 @@
 
     function classifyWithLocalAi(text) {
         if (!state.aiWorker) {
-            state.aiWorkerUrl=URL.createObjectURL(new Blob([`(${localAiWorkerProgram.toString()})()`],{type:'text/javascript'}));
+            state.aiWorkerUrl=URL.createObjectURL(new Blob([`${configureLocalModelCache.toString()}\n(${localAiWorkerProgram.toString()})()`],{type:'text/javascript'}));
             state.aiWorker=new Worker(state.aiWorkerUrl,{type:'module'});
             state.aiWorker.onmessage=({data})=>{
                 const pending=state.aiRequest;if(!pending || data.id!==pending.id)return;
