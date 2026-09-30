@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Ações em Lote (Turmas)
 // @namespace    http://tampermonkey.net/
-// @version      4.5.0
+// @version      4.6.0
 // @description  Módulo Ferramentas para ações em lote por turma, com atualização automática, envio das relações, dados pessoais, atestados, impressão e cópia de códigos.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -25,7 +25,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.5.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.6.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js'
     });
@@ -2128,6 +2128,61 @@
         return {escola,etapa,capacidade,vagas,excedentes,alunos,total:alunos.length,paed,naoPaed,indefinidos,avisos};
     }
 
+    function grupoVagas(turma) {
+        const nome=norm(turma.nome), etapa=norm(turma.etapa);
+        const serie=Number(nome.match(/^(\d+)\s*[º°O]?\s/)?.[1]) || null;
+        if (/ENSINO FUNDAMENTAL/.test(etapa) || (serie>=6 && serie<=9)) {
+            return {etapa:'Fundamental',serie,grupo:serie?`${serie}º ano`:'Série não identificada',ordem:0};
+        }
+        if (/\bEPT\b/.test(nome) || /PROFISSIONAL TECNICO/.test(etapa)) {
+            // Separa o curso e remove apenas a letra isolada de identificação
+            // da sala (AGRO A / AGRO B). Não mistura cursos diferentes.
+            const curso=nome.match(/\bEPT\s+(.+)/)?.[1]?.replace(/\s+[A-Z]$/,'') || 'curso não identificado';
+            return {etapa:'EPT',serie,grupo:`${serie?serie+'º':'Série não identificada'} EPT ${curso}`,ordem:2};
+        }
+        if (/ENSINO MEDIO/.test(etapa) || (serie>=1 && serie<=3)) {
+            // Usa a matriz descrita no PDF, inclusive para nomes como 2º ANO E.
+            let matriz=/MATEMATIC|CIENCIAS DA NATUR/.test(etapa)?'MAT':/LINGUAG/.test(etapa)?'LNG':/HUMAN/.test(etapa)?'HUM':null;
+            if (!matriz) matriz=nome.match(/\b(MAT|LNG|HUM)\b/)?.[1] || 'matriz não identificada';
+            return {etapa:'Médio',serie,grupo:`${serie?serie+'º':'Série não identificada'} ${matriz}`,ordem:1};
+        }
+        return {etapa:'Não identificado',serie:null,grupo:'Série/matriz não identificada',ordem:3};
+    }
+    function agruparVagas(turmas) {
+        const grupos=new Map();
+        for(const turma of turmas) {
+            const info=grupoVagas(turma), key=info.etapa+'|'+info.grupo;
+            if(!grupos.has(key)) grupos.set(key,{...info,turnos:{},total:0,lidas:0,pendentes:0,turmas:0});
+            const g=grupos.get(key), turno=norm(turma.turno)||'NÃO INFORMADO';
+            const t=g.turnos[turno] ||= {vagas:0,lidas:0,pendentes:0,turmas:0};
+            t.turmas++;g.turmas++;
+            // Uma falha não significa turma vazia ou vagas livres.
+            if(Number.isInteger(turma.total) && Number.isInteger(turma.vagas)) {
+                t.vagas+=turma.vagas;t.lidas++;g.total+=turma.vagas;g.lidas++;
+            } else {t.pendentes++;g.pendentes++;}
+        }
+        return [...grupos.values()].sort((a,b)=>a.ordem-b.ordem || (a.serie||99)-(b.serie||99) || a.grupo.localeCompare(b.grupo,'pt-BR'));
+    }
+    function ordenarPrevisao(a,b) {
+        const turnos={MATUTINO:0,VESPERTINO:1,NOTURNO:2,INTEGRAL:3};
+        const ta=norm(a.turno),tb=norm(b.turno),ga=grupoVagas(a),gb=grupoVagas(b);
+        return (turnos[ta]??4)-(turnos[tb]??4) || ta.localeCompare(tb,'pt-BR') || ga.ordem-gb.ordem || (ga.serie||99)-(gb.serie||99) || String(a.nome).localeCompare(String(b.nome),'pt-BR',{numeric:true});
+    }
+    function textoVagasTurno(dados) {
+        if(!dados) return '—';
+        if(!dados.lidas) return 'Pendente';
+        return String(dados.vagas ?? dados.total)+(dados.pendentes?' (parcial)':'');
+    }
+    function resumoVagasHtml(turmas) {
+        const grupos=agruparVagas(turmas);
+        const extras=[...new Set(grupos.flatMap(g=>Object.keys(g.turnos)))].filter(t=>!['MATUTINO','VESPERTINO'].includes(t)).sort();
+        const turnos=['MATUTINO','VESPERTINO',...extras];
+        return `<h2>Vagas por série, matriz e turno</h2>
+            <p>Somente as turmas selecionadas neste relatório. Cada célula soma as vagas livres das turmas do grupo. “—” indica ausência de turmas selecionadas no turno; “Pendente” ou “parcial” indica leitura incompleta. Matrizes não identificadas ficam separadas.</p>
+            <table id="vagas-por-serie"><thead><tr><th>Etapa</th><th>Série / matriz</th>${turnos.map(t=>`<th>${esc(t==='MATUTINO'?'Matutino':t==='VESPERTINO'?'Vespertino':t)}</th>`).join('')}<th>Total de vagas</th><th>Turmas lidas</th></tr></thead>
+            <tbody>${grupos.map(g=>`<tr><td>${esc(g.etapa)}</td><td>${esc(g.grupo)}</td>${turnos.map(t=>`<td>${esc(textoVagasTurno(g.turnos[t]))}</td>`).join('')}<td>${esc(textoVagasTurno(g))}</td><td>${g.lidas}/${g.turmas}</td></tr>`).join('')}</tbody></table>`;
+    }
+
     let root, resultados=[], busy=false, cancelado=false, geradoEm='';
     const anoConsulta='2027';
     const $ = s => root.querySelector(s);
@@ -2154,7 +2209,7 @@
         const selecionadas=obterTurmasSelecionadasNoPainel();
         if(!selecionadas.length) return status('Busque e selecione ao menos uma turma.');
         cancelado=false;setBusy(true);geradoEm=new Date().toLocaleString('pt-BR');
-        resultados=selecionadas.map(t=>({...t,situacao:'Pendente'}));render();
+        resultados=selecionadas.slice().sort(ordenarPrevisao).map(t=>({...t,situacao:'Pendente'}));render();
         try {
             if(typeof pdfjsLib==='undefined') throw Error('Biblioteca de leitura de PDF não carregada. Recarregue a página.');
             pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
@@ -2183,23 +2238,23 @@
         return `<h2>Previsão de alunos por turma — ${esc(anoConsulta)}</h2>
             <p>${esc([...new Set(ok.map(r=>r.escola))].join(' • '))}</p>
             <p>${completo?'Relatório conferido':'RELATÓRIO PARCIAL / COM PENDÊNCIAS'} · ${ok.length}/${resultados.length} turmas lidas · ${esc(geradoEm)}</p>
-            <p><strong>${sum('total')} alunos · ${sum('paed')} PAED · ${sum('naoPaed')} não PAED · ${sum('indefinidos')} não identificados</strong></p>
+            <p><strong>${sum('total')} alunos · ${sum('paed')} PAED</strong></p>
             <p>Totais somados por turma; um aluno previsto em mais de uma turma conta em cada uma. Inclui todos os alunos do PDF, independentemente da matrícula efetivada.</p>
             <p>Vagas disponíveis = capacidade menos alunos previstos: 30 no fundamental e 35 no médio/EPT. Acima da capacidade, as vagas ficam em zero e o excedente é indicado.</p>
-            <table><thead><tr><th>Turma</th><th>Vagas disponíveis</th><th>Turno</th><th>Total</th><th>PAED</th><th>Não PAED</th><th>Não identificado</th><th>Situação</th></tr></thead><tbody>
-            ${resultados.map(r=>`<tr><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.nome)}</a></td><td>${r.vagas??'—'}</td><td>${esc(r.turno)}</td><td>${r.total??'—'}</td><td>${r.paed??'—'}</td><td>${r.naoPaed??'—'}</td><td>${r.indefinidos??'—'}</td><td>${esc(r.situacao)}${r.erro?'<br>'+esc(r.erro):''}${r.avisos?.length?'<br>'+esc(r.avisos.join(' ')):''}</td></tr>`).join('')}
-            </tbody><tfoot><tr><th>${completo?'Total':'Subtotal lido'}</th><th>${ok.some(r=>r.vagas!==null)?sum('vagas'):'—'}</th><th></th><th>${sum('total')}</th><th>${sum('paed')}</th><th>${sum('naoPaed')}</th><th>${sum('indefinidos')}</th><th>${ok.length}/${resultados.length} turmas</th></tr></tfoot></table>`;
+            <table><thead><tr><th>Turma</th><th>Vagas disponíveis</th><th>Turno</th><th>Total</th><th>PAED</th><th>Situação</th></tr></thead><tbody>
+            ${[...resultados].sort(ordenarPrevisao).map(r=>`<tr><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.nome)}</a></td><td>${r.vagas??'—'}</td><td>${esc(r.turno)}</td><td>${r.total??'—'}</td><td>${r.paed??'—'}</td><td>${esc(r.situacao)}${r.erro?'<br>'+esc(r.erro):''}${r.avisos?.length?'<br>'+esc(r.avisos.join(' ')):''}</td></tr>`).join('')}
+            </tbody><tfoot><tr><th>${completo?'Total':'Subtotal lido'}</th><th>${ok.some(r=>r.vagas!==null)?sum('vagas'):'—'}</th><th></th><th>${sum('total')}</th><th>${sum('paed')}</th><th>${ok.length}/${resultados.length} turmas</th></tr></tfoot></table>${resumoVagasHtml(resultados)}`;
     }
     function render() {
         $('#resumo').innerHTML=resultados.length?resumoHtml():'';
-        $('#detalhes').innerHTML=resultados.filter(r=>r.alunos).map(r=>`<details><summary>${esc(r.nome)} · ${esc(r.turno)} — ${r.total} alunos (${r.paed} PAED)</summary><table><thead><tr><th>Código</th><th>Aluno</th><th>PAED</th></tr></thead><tbody>${r.alunos.map(a=>`<tr><td>${esc(a.codigo)}</td><td>${esc(a.nome)}</td><td>${esc(a.paed)}</td></tr>`).join('')}</tbody></table></details>`).join('');
+        $('#detalhes').innerHTML=resultados.filter(r=>r.alunos).sort(ordenarPrevisao).map(r=>`<details><summary>${esc(r.nome)} · ${esc(r.turno)} — ${r.total} alunos (${r.paed} PAED)</summary><table><thead><tr><th>Código</th><th>Aluno</th><th>PAED</th></tr></thead><tbody>${r.alunos.map(a=>`<tr><td>${esc(a.codigo)}</td><td>${esc(a.nome)}</td><td>${esc(a.paed)}</td></tr>`).join('')}</tbody></table></details>`).join('');
         for(const id of ['csv','csv-alunos','imprimir']) $('#'+id).disabled=busy||!resultados.length;
     }
     function csv(detalhado) {
-        const rows=detalhado?[['Ano','Turma','Turno','Código','Aluno','PAED']]:[['Ano','Turma','Vagas disponíveis','Turno','Total','PAED','Não PAED','Não identificado','Capacidade','Acima da capacidade','Situação','Observação']];
-        for(const r of resultados) {
+        const rows=detalhado?[['Ano','Turma','Turno','Código','Aluno','PAED']]:[['Ano','Turma','Vagas disponíveis','Turno','Total','PAED','Capacidade','Acima da capacidade','Situação','Observação']];
+        for(const r of [...resultados].sort(ordenarPrevisao)) {
             if(detalhado) for(const a of r.alunos||[]) rows.push([anoConsulta,r.nome,r.turno,a.codigo,a.nome,a.paed]);
-            else rows.push([anoConsulta,r.nome,r.vagas??'',r.turno,r.total??'',r.paed??'',r.naoPaed??'',r.indefinidos??'',r.capacidade??'',r.excedentes??'',r.situacao,r.erro||r.avisos?.join(' ')||'']);
+            else rows.push([anoConsulta,r.nome,r.vagas??'',r.turno,r.total??'',r.paed??'',r.capacidade??'',r.excedentes??'',r.situacao,r.erro||r.avisos?.join(' ')||'']);
         }
         const safe=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,c=>"'"+c).replace(/"/g,'""')+'"';
         const blob=new Blob(['\uFEFF'+rows.map(r=>r.map(safe).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'});

@@ -1,6 +1,6 @@
 # Previsão de alunos por turma
 
-Atualize o Ações em Lote para a versão **4.5.0**, recarregue o GED e escolha **Previsão de alunos por turma (PAED)** no dropdown.
+Atualize o Ações em Lote para a versão **4.6.0**, recarregue o GED e escolha **Previsão de alunos por turma (PAED)** no dropdown.
 
 1. Use a lista de turmas já restaurada do cache pelo Ações em Lote. Se precisar atualizá-la, clique no botão original **Atualizar Turmas**.
 2. Marque as turmas desejadas na mesma lista do painel.
@@ -20,6 +20,14 @@ Os resultados ficam na memória da aba. A previsão não envia dados para planil
 A capacidade segue os valores informados pelo usuário: **30 no ensino fundamental** e **35 no ensino médio/EPT**. A etapa é identificada no cabeçalho do PDF. Vagas disponíveis são a capacidade menos o total de alunos, com mínimo zero. Turmas acima da capacidade mostram o excedente na situação. Quando a leitura falha ou a etapa não é identificada, as vagas ficam sem valor; não são presumidas vagas livres.
 
 Páginas de continuação reutilizam as posições das colunas da primeira página. Páginas apenas com totais ou continuação do rodapé também são aceitas. A mensagem explícita do GED “Não há aluno(s) matriculado(s) na Série/Ano/Fase.” permite confirmar uma turma vazia sem rodapé numérico; ela aparece como **Sem alunos**. Ausência de texto por si só não confirma zero alunos.
+
+## Ordem e resumo final
+
+O relatório e o CSV são ordenados primeiro por turno (matutino, vespertino, noturno; demais turnos depois), depois por etapa (fundamental, médio, EPT) e série. A tabela principal exibe Turma, Vagas disponíveis, Turno, Total, PAED e Situação. Casos de PAED não identificado são registrados na observação da situação; não há colunas de Não PAED e Não identificado.
+
+Ao final do relatório na tela e na impressão, o quadro **Vagas por série, matriz e turno** soma as vagas das turmas selecionadas. Fundamental é agrupado por série; médio por série e matriz MAT/LNG/HUM, usando a descrição no PDF ou a sigla explícita no nome. EPT fica separado por série e curso. A/B/C identificando turmas não são usadas como matriz. Quando não é possível identificar a matriz, ela fica em um grupo separado.
+
+O quadro tem colunas para matutino e vespertino, e inclui outros turnos quando presentes. “—” significa que não há turma selecionada no turno; leituras incompletas aparecem como “Pendente” ou subtotal “parcial”. Vagas de turmas acima da capacidade continuam em zero e não subtraem vagas livres de outras turmas.
 
 ## Validação
 
