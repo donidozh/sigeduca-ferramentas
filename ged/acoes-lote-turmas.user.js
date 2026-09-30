@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Ações em Lote (Turmas)
 // @namespace    http://tampermonkey.net/
-// @version      4.4.1
+// @version      4.4.2
 // @description  Módulo Ferramentas para ações em lote por turma, com atualização automática, envio das relações, dados pessoais, atestados, impressão e cópia de códigos.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -25,7 +25,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.4.1',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.4.2',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js'
     });
@@ -674,8 +674,8 @@
             </select>
 
             <div id="opcoes-previsao-lote" hidden style="margin-bottom:10px; padding:10px; background:#edf4fc; border-radius:4px;">
-                <label>Ano da previsão: <input id="ano-previsao-lote" type="number" value="2027" min="2000" max="2099" style="width:85px; padding:5px;"></label>
-                <p style="margin:6px 0 0">Clique em Buscar turmas para previsão, selecione as turmas acima e gere o relatório de total de alunos e PAED.</p>
+                <strong>Ano da previsão: 2027</strong>
+                <p style="margin:6px 0 0">Use as turmas já carregadas do cache ou clique em Atualizar Turmas. Marque as turmas acima e gere a previsão de 2027.</p>
             </div>
             <button type="button" id="btn-iniciar-lote" style="width: 100%; padding: 12px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; opacity: 0.5;" disabled>2. Iniciar Processo 🚀</button>
 
@@ -746,7 +746,7 @@
             trilho.style.transform = "translateX(0)";
         };
 
-        document.getElementById('btn-mapear').onclick = () => document.getElementById('acao-lote').value === 'previsao_alunos' ? previsaoLote.buscar() : atualizarTurmas();
+        document.getElementById('btn-mapear').onclick = atualizarTurmas;
         document.getElementById('btn-exportar-links-lote').onclick = exportarLinksDasTurmas;
         document.getElementById('btn-iniciar-lote').onclick = () => executarAcaoLoteSelecionada();
         document.getElementById('acao-lote').addEventListener('change', () => {
@@ -2020,13 +2020,16 @@
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Usa o href nativo do botão de previsão, sem reconstruir seus parâmetros.
-    function urlPrevisao(raw, ano, origin) {
+    // Mesma turma do cache/grade do lote: altera somente o endpoint e o ano.
+    // Os demais parâmetros, inclusive filtros finais, permanecem intactos.
+    function urlPrevisao(raw, origin) {
         const url = new URL(raw.replace(/&amp;/g, '&'), origin + '/ged/');
-        if (url.origin !== origin || !/\/ged\/arrprevisaoalunosturma\.aspx$/i.test(url.pathname)) throw Error('Link de previsão inválido.');
+        if (url.origin !== origin || !/\/ged\/arr(?:previsaoalunosturma|alunossituacao)\.aspx$/i.test(url.pathname)) throw Error('Link de turma inválido.');
         const parts = url.search.slice(1).split(',');
-        if (parts.length !== 10 || parts.some(p => !p)) throw Error('O botão de previsão contém parâmetros incompletos.');
-        if (parts[0] !== String(ano)) throw Error('A grade ainda contém turmas de outro ano. Consulte o ano desejado no GED.');
+        if (parts.length < 7 || parts.slice(0,7).some(p => !p)) throw Error('O link da turma está incompleto. Atualize as turmas.');
+        parts[0] = '2027';
+        url.pathname = '/ged/arrprevisaoalunosturma.aspx';
+        url.search = '?' + parts.join(',');
         return url.href;
     }
 
@@ -2102,120 +2105,15 @@
         return {escola,alunos,total:alunos.length,paed,naoPaed,indefinidos,avisos};
     }
 
-    let root, turmas=[], resultados=[], busy=false, cancelado=false, anoConsulta='', geradoEm='';
+    let root, resultados=[], busy=false, cancelado=false, geradoEm='';
+    const anoConsulta='2027';
     const $ = s => root.querySelector(s);
     const status = text => { $('#status').textContent=text; };
-    const grid = () => document.getElementById('GridfreestyleContainerTbl');
-    function ajax() {
-        const el=document.getElementById('gx_ajax_notification');
-        if (!el) return false;
-        const s=getComputedStyle(el); return s.display!=='none' && s.visibility!=='hidden' && s.opacity!=='0';
-    }
-    async function aguardarAcao(action, precisaGrade=true) {
-        let mudou=false, last=Date.now(), viuAjax=false;
-        const obs=new MutationObserver(records=>{
-            if (records.some(r=>!(r.target===document.getElementById('previsao-host') || document.getElementById('previsao-host')?.contains(r.target)))) { mudou=true;last=Date.now(); }
-        });
-        obs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true});
-        const start=Date.now();
-        try {
-            action();
-            while (Date.now()-start<45000) {
-                if(cancelado) throw Error('Consulta interrompida.');
-                const active=ajax(); viuAjax ||= active;
-                if (!active && (mudou || viuAjax) && Date.now()-last>900 && Date.now()-start>1500 && (!precisaGrade||grid()||document.querySelector('img[id^="vIMPRIMIRPREVISAO_"]'))) return;
-                await sleep(100);
-            }
-            throw Error('Não foi possível confirmar a atualização da grade. Consulte novamente no GED.');
-        } finally { obs.disconnect(); }
-    }
-    function mudarCampo(el,value) {
-        if (!el) throw Error('Filtro do GED não encontrado.');
-        el.value=value;
-        if(el.value!==value) throw Error('O ano ou turno solicitado não está disponível no GED.');
-        for(const type of ['input','change','blur']) el.dispatchEvent(new Event(type,{bubbles:true}));
-    }
-    async function aguardarFiltros() {
-        const start=Date.now();
-        await sleep(1200);
-        while(ajax()) {
-            if(cancelado) throw Error('Consulta interrompida.');
-            if(Date.now()-start>45000) throw Error('O GED não terminou de atualizar os filtros.');
-            await sleep(150);
-        }
-    }
-    function coletarGrade(ano) {
-        const list=new Map();
-        // O botão pode estar em uma tabela interna, longe do span do nome.
-        // O próprio href identifica a turma; não depende de IDs da grade/nome.
-        const buttons=[...document.querySelectorAll('img[id^="vIMPRIMIRPREVISAO_"]')];
-        const anchors=new Set(buttons.map(img=>img.closest('a[href]')).filter(Boolean));
-        for(const a of document.querySelectorAll('a[href]')) {
-            if (/(?:^|\/)arrprevisaoalunosturma\.aspx\?/i.test(a.getAttribute('href')||'')) anchors.add(a);
-        }
-        if(buttons.some(img=>!img.closest('a[href]'))) throw Error('Um botão de previsão está sem link. Consulte as turmas novamente.');
-        for(const a of anchors) {
-            const url=urlPrevisao(a.getAttribute('href'),ano,location.origin);
-            const parts=new URL(url).search.slice(1).split(',');
-            const nome=decodeURIComponent(parts[6].replace(/\+/g,' ')).trim();
-            if(!nome) throw Error('Nome da turma ausente no link de previsão.');
-            const row=a.closest('tr');
-            const turnos=norm(row?.textContent).match(/MATUTINO|VESPERTINO|NOTURNO|INTEGRAL/g)||[];
-            const unicos=[...new Set(turnos)];
-            const turno=unicos.length===1?unicos[0]:'NÃO INFORMADO';
-            list.set(url,{nome,turno,url});
-        }
-        if(!list.size) throw Error('Nenhum botão de previsão (vIMPRIMIRPREVISAO) foi encontrado para esse ano.');
-        return [...list.values()];
-    }
-    function proximaPagina() {
-        return [...document.querySelectorAll('input,button,a,img')].find(el=>{
-            const tag=[el.id,el.getAttribute('name'),el.getAttribute('title'),el.getAttribute('alt'),el.getAttribute('aria-label'),el.tagName==='A'?el.textContent:''].join(' ');
-            return /PAGINGNEXT|PROXIMA PAGINA|PROXIMO|NEXT PAGE/i.test(norm(tag)) && !el.disabled && el.getAttribute('aria-disabled')!=='true' && !/disabled/i.test(el.className||'');
-        });
-    }
     function setBusy(value) {
         busy=value; isRodando=value;
-        for(const el of document.querySelectorAll('#ano-previsao-lote,#btn-mapear,#btn-iniciar-lote,#acao-lote,#chk-todas-turmas,.chk-turma-item,#btn-retomar-checkpoint,#btn-exportar-links-lote')) el.disabled=value;
+        for(const el of document.querySelectorAll('#btn-mapear,#btn-iniciar-lote,#acao-lote,#chk-todas-turmas,.chk-turma-item,#btn-retomar-checkpoint,#btn-exportar-links-lote')) el.disabled=value;
         if(!value) resetarBotaoLote();
         $('#parar').disabled=!value;
-    }
-    async function buscar() {
-        if(busy) return;
-        cancelado=false;setBusy(true);turmas=[];resultados=[];render();turmasMapeadas=[];renderizarTurmasMapeadas();
-        try {
-            const ano=document.getElementById('ano-previsao-lote').value.trim();
-            if(!/^20\d{2}$/.test(ano)) throw Error('Informe um ano válido.');
-            status(`Consultando turmas de ${ano}, em todos os turnos...`);
-            const year=document.getElementById('vGERANOLETCOD');
-            if(!year) throw Error('Não encontrei o filtro de ano vGERANOLETCOD nesta tela.');
-            if(year.value!==ano) {
-                mudarCampo(year,ano); await aguardarFiltros();
-            }
-            mudarCampo(document.getElementById('vGRHTRNCOD'),'0'); await aguardarFiltros();
-            const btn=document.querySelector('input[name="BCONSULTAR"],#BCONSULTAR,.btnConsultar');
-            if(!btn) throw Error('Botão Consultar não encontrado.');
-            await aguardarAcao(()=>btn.click());
-            const encontrados=new Map(), paginas=new Set();
-            for(let page=0;page<200;page++) {
-                if(cancelado) throw Error('Consulta interrompida.');
-                const batch=coletarGrade(ano);
-                const assinatura=batch.map(t=>t.url).join('|');
-                if(paginas.has(assinatura)) throw Error('A paginação não avançou. Verifique os controles de página do GED.');
-                paginas.add(assinatura);batch.forEach(t=>encontrados.set(t.url,t));
-                const next=proximaPagina();
-                if(!next) break;
-                if(page===199) throw Error('Limite de páginas atingido. Refine a consulta.');
-                status(`Lendo página ${page+2} das turmas de ${ano}...`);
-                await aguardarAcao(()=>next.click());
-            }
-            if(!encontrados.size) throw Error('Nenhuma turma encontrada para esse ano e os filtros atuais.');
-            turmas=[...encontrados.values()].sort((a,b)=>a.turno.localeCompare(b.turno)||a.nome.localeCompare(b.nome,'pt-BR',{numeric:true}));
-            anoConsulta=ano;
-            turmasMapeadas=turmas;
-            renderizarTurmasMapeadas(turmas.length+' turmas de '+ano+' encontradas.');
-            status(`${turmas.length} turmas de ${ano} encontradas. Selecione as turmas e gere o relatório.`);
-        } catch(e) {status(e.message);} finally {setBusy(false);}
     }
     function baixarPdf(url) {
         return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url,responseType:'arraybuffer',timeout:45000,
@@ -2228,10 +2126,10 @@
         }));
     }
     async function gerar() {
-        if(busy) return;
+        if(busy || isRodando) return;
+        if(isAtualizandoTurmas) return status('Aguarde a atualização das turmas terminar.');
         const selecionadas=obterTurmasSelecionadasNoPainel();
         if(!selecionadas.length) return status('Busque e selecione ao menos uma turma.');
-        if(document.getElementById('ano-previsao-lote').value!==anoConsulta) return status('O ano foi alterado. Busque as turmas novamente.');
         cancelado=false;setBusy(true);geradoEm=new Date().toLocaleString('pt-BR');
         resultados=selecionadas.map(t=>({...t,situacao:'Pendente'}));render();
         try {
@@ -2241,6 +2139,7 @@
                 if(cancelado) break;
                 const r=resultados[i];r.situacao='Lendo';render();status(`Lendo ${i+1}/${resultados.length}: ${r.nome} (${r.turno})...`);
                 try {
+                    r.url=urlPrevisao(r.url,location.origin);
                     const data=await baixarPdf(r.url);
                     const pdf=await pdfjsLib.getDocument({data}).promise;
                     try {
@@ -2288,7 +2187,7 @@
         let host=document.getElementById('previsao-host');
         if(host) return host;
         host=document.createElement('div');host.id='previsao-host';root=host.attachShadow({mode:'open'});
-        root.innerHTML=`<style>${css}section{padding:12px;margin:12px 0}h2{font-size:17px}</style><section><p id="status" role="status" aria-live="polite">Atualize as turmas de 2027 e clique em Gerar previsão.</p><div class="acoes"><button id="parar" disabled>Parar após a consulta atual</button><button id="csv" disabled>Baixar resumo CSV</button><button id="csv-alunos" disabled>Baixar alunos CSV</button><button id="imprimir" disabled>Imprimir / salvar PDF</button></div><div id="resumo" class="scroll"></div><div id="detalhes" class="scroll"></div></section>`;
+        root.innerHTML=`<style>${css}section{padding:12px;margin:12px 0}h2{font-size:17px}</style><section><p id="status" role="status" aria-live="polite">Use as turmas do cache ou Atualizar Turmas e clique em Gerar previsão. O relatório será consultado em 2027.</p><div class="acoes"><button id="parar" disabled>Parar após a consulta atual</button><button id="csv" disabled>Baixar resumo CSV</button><button id="csv-alunos" disabled>Baixar alunos CSV</button><button id="imprimir" disabled>Imprimir / salvar PDF</button></div><div id="resumo" class="scroll"></div><div id="detalhes" class="scroll"></div></section>`;
         document.getElementById('log-lote').insertAdjacentElement('afterend',host);
         for(const button of root.querySelectorAll('button')) button.type='button';
         $('#parar').onclick=()=>{cancelado=true;status('Parada solicitada. Aguardando a consulta atual terminar...');};
@@ -2299,24 +2198,18 @@
         };
         render();return host;
     }
-    let ativo=false;
     function ativar(value) {
-        if(value!==ativo) {
-            turmasMapeadas=[];turmas=[];anoConsulta='';
-            renderizarTurmasMapeadas(value?'Atualize as turmas do ano da previsão.':'Atualize as turmas para a ação selecionada.');
-            document.getElementById('status-mapeamento').textContent=value?'Atualize as turmas do ano da previsão.':'Atualize as turmas para a ação selecionada.';
-        }
-        ativo=value;
+        // Alternar a ação não limpa o cache, a lista nem as marcações do lote.
         document.getElementById('opcoes-previsao-lote').hidden=!value;
         const host=value?iniciar():document.getElementById('previsao-host');if(host)host.hidden=!value;
-        document.getElementById('btn-mapear').textContent=value?'1. Buscar turmas para previsão':'1. Atualizar Turmas';
+        document.getElementById('btn-mapear').textContent='1. Atualizar Turmas';
         document.getElementById('btn-abrir-planilha-lote').hidden=value;
         document.getElementById('btn-abrir-planilha-lote').style.display=value?'none':'block';
         document.getElementById('chk-retomada-automatica').closest('label').hidden=value;
         if(value) document.getElementById('checkpoint-lote-box').style.display='none';
         else atualizarPainelCheckpoint();
     }
-    return {buscar,gerar,ativar};
+    return {gerar,ativar};
 
     })();
 
