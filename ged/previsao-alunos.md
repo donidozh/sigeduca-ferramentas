@@ -1,6 +1,6 @@
 # Previsão de alunos por turma
 
-Atualize `SIGEDUCA - Ferramentas - Ações em Lote (Turmas).user.js` para a versão **4.4.0** no Tampermonkey. Recarregue o GED, abra **Ferramentas → Ações em Lote** e escolha **Previsão de alunos por turma (PAED)** no dropdown. Toda a implementação está no próprio script de Ações em Lote. Se instalou a versão separada de Previsão de Alunos, pode desativá-la para remover a entrada antiga do menu.
+Atualize `SIGEDUCA - Ferramentas - Ações em Lote (Turmas).user.js` para a versão **4.4.1** no Tampermonkey. Recarregue o GED, abra **Ferramentas → Ações em Lote** e escolha **Previsão de alunos por turma (PAED)** no dropdown. Toda a implementação está no próprio script de Ações em Lote. Se instalou a versão separada de Previsão de Alunos, pode desativá-la para remover a entrada antiga do menu.
 
 1. O ano inicial é **2027**. Clique em **Buscar turmas para previsão**. O script seleciona o ano no filtro do GED e consulta todos os turnos. Os demais filtros nativos continuam valendo; deixe-os abrangentes se quiser todas as turmas da escola.
 2. Marque as turmas na lista do próprio Ações em Lote e clique em **Gerar previsão de alunos**.
@@ -9,7 +9,7 @@ Atualize `SIGEDUCA - Ferramentas - Ações em Lote (Turmas).user.js` para a vers
 
 A classificação usa exclusivamente a coluna **Aluno PAED?**. Todos os alunos previstos no PDF entram na contagem, inclusive aqueles com matrícula ainda não efetivada. O total geral é a soma por turma, não a quantidade de pessoas únicas entre turmas.
 
-O script usa os identificadores das turmas retornadas para o ano escolhido. Prefere o link nativo de previsão; quando a grade fornece somente `arralunossituacao.aspx`, conserva os sete primeiros parâmetros e usa os três filtros finais `0,0,0` do modelo informado. Links de outro ano são recusados.
+O script lê o `href` do link que envolve a imagem `vIMPRIMIRPREVISAO_...`, preservando todos os parâmetros do GED. O nome da turma é extraído desse link, sem depender de `span_vGERTURSAL` ou de um ID específico de grade. Links de previsão repetidos são deduplicados. Outros relatórios, como `arralunossituacao.aspx`, não são convertidos. Links de outro ano são recusados.
 
 Cada PDF é conferido pela escola, nome da turma, turno quando disponível, sequência, códigos únicos e total do rodapé. Uma falha não vira zero: aparece com a explicação e deixa o relatório parcial. PAED ausente ou diferente de SIM/NÃO fica como **não identificado**. Turmas ainda não consultadas após uma interrupção permanecem pendentes. O CSV detalhado contém somente os alunos lidos; o CSV de resumo registra também as pendências.
 
@@ -25,4 +25,3 @@ Os dados ficam na memória da aba até recarregar/fechar. As consultas são feit
 A implementação está em [acoes-lote-turmas.user.js](acoes-lote-turmas.user.js), integrada ao dropdown de Ações em Lote.
 
 Ao entrar ou sair da ação de previsão, a lista é limpa para exigir uma consulta apropriada à ação escolhida. A previsão não grava checkpoint; a retomada automática de envio à planilha fica suspensa enquanto essa opção estiver selecionada.
-

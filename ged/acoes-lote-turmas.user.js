@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Ações em Lote (Turmas)
 // @namespace    http://tampermonkey.net/
-// @version      4.4.0
+// @version      4.4.1
 // @description  Módulo Ferramentas para ações em lote por turma, com atualização automática, envio das relações, dados pessoais, atestados, impressão e cópia de códigos.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -25,7 +25,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.4.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.4.1',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js'
     });
@@ -2020,14 +2020,14 @@
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Preserva os identificadores da turma retornada em 2027. Nunca transforma
-    // uma turma de outro ano em turma de 2027 apenas trocando o ano na URL.
+    // Usa o href nativo do botão de previsão, sem reconstruir seus parâmetros.
     function urlPrevisao(raw, ano, origin) {
         const url = new URL(raw.replace(/&amp;/g, '&'), origin + '/ged/');
-        if (url.origin !== origin || !/\/ged\/arr(?:previsaoalunosturma|alunossituacao)\.aspx$/i.test(url.pathname)) throw Error('Link de turma inválido.');
+        if (url.origin !== origin || !/\/ged\/arrprevisaoalunosturma\.aspx$/i.test(url.pathname)) throw Error('Link de previsão inválido.');
         const parts = url.search.slice(1).split(',');
-        if (parts.length < 7 || parts.slice(0, 7).some(p => !p) || parts[0] !== String(ano)) throw Error('A grade ainda contém turmas de outro ano. Consulte o ano desejado no GED.');
-        return origin + '/ged/arrprevisaoalunosturma.aspx?' + [...parts.slice(0, 7), '0', '0', '0'].join(',');
+        if (parts.length !== 10 || parts.some(p => !p)) throw Error('O botão de previsão contém parâmetros incompletos.');
+        if (parts[0] !== String(ano)) throw Error('A grade ainda contém turmas de outro ano. Consulte o ano desejado no GED.');
+        return url.href;
     }
 
     // PDF.js retorna textos na ordem de desenho. Agrupar por posição evita
@@ -2123,7 +2123,7 @@
             while (Date.now()-start<45000) {
                 if(cancelado) throw Error('Consulta interrompida.');
                 const active=ajax(); viuAjax ||= active;
-                if (!active && (mudou || viuAjax) && Date.now()-last>900 && Date.now()-start>1500 && (!precisaGrade||grid())) return;
+                if (!active && (mudou || viuAjax) && Date.now()-last>900 && Date.now()-start>1500 && (!precisaGrade||grid()||document.querySelector('img[id^="vIMPRIMIRPREVISAO_"]'))) return;
                 await sleep(100);
             }
             throw Error('Não foi possível confirmar a atualização da grade. Consulte novamente no GED.');
@@ -2145,18 +2145,28 @@
         }
     }
     function coletarGrade(ano) {
-        const list=[];
-        if(!grid()) throw Error('Grade de turmas não encontrada.');
-        for(const span of grid().querySelectorAll('[id^="span_vGERTURSAL_"]')) {
-            const row=span.closest('tr');
-            const native=row.innerHTML.match(/arrprevisaoalunosturma\.aspx\?[^"'\s<>]+/i);
-            const fallback=row.innerHTML.match(/arralunossituacao\.aspx\?[^"'\s<>]+/i);
-            if(!native&&!fallback) throw Error('Uma turma da grade não possui link de relatório reconhecido.');
-            const nome=span.textContent.trim();
-            const turno=norm(row.textContent).match(/MATUTINO|VESPERTINO|NOTURNO|INTEGRAL/)?.[0] || 'NÃO INFORMADO';
-            list.push({nome,turno,url:urlPrevisao((native||fallback)[0],ano,location.origin)});
+        const list=new Map();
+        // O botão pode estar em uma tabela interna, longe do span do nome.
+        // O próprio href identifica a turma; não depende de IDs da grade/nome.
+        const buttons=[...document.querySelectorAll('img[id^="vIMPRIMIRPREVISAO_"]')];
+        const anchors=new Set(buttons.map(img=>img.closest('a[href]')).filter(Boolean));
+        for(const a of document.querySelectorAll('a[href]')) {
+            if (/(?:^|\/)arrprevisaoalunosturma\.aspx\?/i.test(a.getAttribute('href')||'')) anchors.add(a);
         }
-        return list;
+        if(buttons.some(img=>!img.closest('a[href]'))) throw Error('Um botão de previsão está sem link. Consulte as turmas novamente.');
+        for(const a of anchors) {
+            const url=urlPrevisao(a.getAttribute('href'),ano,location.origin);
+            const parts=new URL(url).search.slice(1).split(',');
+            const nome=decodeURIComponent(parts[6].replace(/\+/g,' ')).trim();
+            if(!nome) throw Error('Nome da turma ausente no link de previsão.');
+            const row=a.closest('tr');
+            const turnos=norm(row?.textContent).match(/MATUTINO|VESPERTINO|NOTURNO|INTEGRAL/g)||[];
+            const unicos=[...new Set(turnos)];
+            const turno=unicos.length===1?unicos[0]:'NÃO INFORMADO';
+            list.set(url,{nome,turno,url});
+        }
+        if(!list.size) throw Error('Nenhum botão de previsão (vIMPRIMIRPREVISAO) foi encontrado para esse ano.');
+        return [...list.values()];
     }
     function proximaPagina() {
         return [...document.querySelectorAll('input,button,a,img')].find(el=>{
