@@ -2,6 +2,14 @@
   "formato": 1,
   "ferramentas": [
     {
+      "id": "gpe-calendario-a4",
+      "titulo": "Calendário A4",
+      "descricao": "Formata a impressão do calendário escolar em A4 retrato, com legenda e assinaturas ao final. Abra Imprimir Calendário no GPE.",
+      "arquivo": "gpe/calendario-a4.user.js",
+      "registros": ["gpe-calendario-a4"],
+      "modulos": ["grh"]
+    },
+    {
       "id": "arquivo-digital-gpe",
       "titulo": "Arquivo Digital - GPE",
       "descricao": "Consulta de servidores no SIGEDUCA e área reservada para documentos internos.",

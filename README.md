@@ -27,6 +27,7 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Ferramenta | Instalação | Onde aparece |
 | --- | --- | --- |
 | Arquivo Digital - GPE | [Instalar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/arquivo-digital-servidores.user.js) | GPE — cadastro de servidores |
+| Calendário A4 (GPE) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/calendario-a4.user.js) | Imprimir Calendário no GPE |
 | Menu Lateral de Ferramentas (Base) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js) | Menu Ferramentas |
 | Termos de Compromisso | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/termos-compromisso.user.js) | Menu Ferramentas |
 | Requerimentos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/requerimentos.user.js) | Menu Ferramentas |
