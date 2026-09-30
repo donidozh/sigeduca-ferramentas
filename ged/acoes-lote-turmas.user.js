@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Ações em Lote (Turmas)
 // @namespace    http://tampermonkey.net/
-// @version      4.4.2
+// @version      4.5.0
 // @description  Módulo Ferramentas para ações em lote por turma, com atualização automática, envio das relações, dados pessoais, atestados, impressão e cópia de códigos.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -25,7 +25,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.4.2',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.5.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js'
     });
@@ -2048,33 +2048,50 @@
 
     function analisarPdf(pages, turma) {
         const alunos = [], totais = [], avisos = [];
-        let escola = '', nomePdf = '', turnoPdf = '';
+        let escola = '', nomePdf = '', turnoPdf = '', etapa = '';
+        let colunas = null, vaziaExplicita = false, terminouTabela = false;
+        const schoolCode = new URL(turma.url).search.slice(1).split(',')[1];
         for (const items of pages) {
             const rows = linhasPdf(items);
             const full = norm(rows.map(r=>r.text).join(' '));
             if (!full.includes('PREVISAO DE ALUNOS NA TURMA')) throw Error('O arquivo não é um relatório de previsão de alunos.');
             const school = rows.find(r=>/\d+\s*-\s*.+/.test(r.text) && r.items.some(i=>/^\d+\s*-\s*/.test(i.text)));
-            if (school) escola = school.items.find(i=>/^\d+\s*-\s*/.test(i.text)).text;
+            if (school) {
+                escola = school.items.find(i=>/^\d+\s*-\s*/.test(i.text)).text;
+                if (!escola.startsWith(schoolCode + ' ')) throw Error('A escola no PDF não corresponde à escola consultada.');
+            }
+            if (/NAO HA ALUNO(?:\(S\)|S)? MATRICULADO(?:\(S\)|S)? NA SERIE\s*\/\s*ANO\s*\/\s*FASE/.test(full)) vaziaExplicita = true;
             for (const row of rows) {
                 const m = row.text.match(/Turma:\s*(.+?)\s+Sala:/i);
-                if (m) nomePdf = m[1].trim();
+                if (m) {
+                    nomePdf = m[1].trim();
+                    if (norm(nomePdf) !== norm(turma.nome)) throw Error('A turma no PDF não corresponde à turma solicitada.');
+                }
                 const t = row.text.match(/Turno:\s*(.+)$/i);
                 if (t) turnoPdf = t[1].trim();
+                const e = row.text.match(/Série\s*\/\s*Ano\s*\/\s*Fase:\s*(.+?)\s+Turma:/i);
+                if (e) etapa = e[1].trim();
                 const total = norm(row.text).match(/QTDE TOTAL DE ALUNOS:\s*(\d+)/);
                 if (total) totais.push(Number(total[1]));
             }
             const header = rows.find(r => norm(r.text).includes('ALUNO PAED?') && norm(r.text).includes('NOME'));
-            if (!header) throw Error('Cabeçalho das colunas não reconhecido.');
-            const column = pattern => {
-                const item = header.items.find(i=>pattern.test(norm(i.text)));
-                if (!item) throw Error('Colunas do PDF diferentes do modelo.');
-                return item.x;
-            };
-            const xCod = column(/^COD\./), xNome = column(/^NOME$/), xData = column(/^DATA/), xPaed = column(/^ALUNO PAED/), xTipo = column(/^TIPO/);
+            if (header) {
+                const column = pattern => {
+                    const item = header.items.find(i=>pattern.test(norm(i.text)));
+                    if (!item) throw Error('Colunas do PDF diferentes do modelo.');
+                    return item.x;
+                };
+                colunas = {xCod:column(/^COD\./),xNome:column(/^NOME$/),xData:column(/^DATA/),xPaed:column(/^ALUNO PAED/),xTipo:column(/^TIPO/)};
+            }
+            // O GED imprime as colunas só na primeira página. As seguintes
+            // podem conter alunos, apenas os totais ou a continuação do rodapé.
+            if (!colunas) throw Error('Cabeçalho inicial das colunas não reconhecido.');
+            if (terminouTabela) continue;
+            const {xCod,xNome,xData,xPaed,xTipo} = colunas;
             const cell = (row, start, end) => row.items.filter(i=>i.x>=start-2 && i.x<end-2).map(i=>i.text).join(' ').trim();
             let anterior = null;
-            for (const row of rows.filter(r=>r.y<header.y-3)) {
-                if (/QTDE TOTAL|TOTAL DE ALUNO/.test(norm(row.text))) break;
+            for (const row of rows.filter(r=>!header || r.y<header.y-3)) {
+                if (/QTDE TOTAL|TOTAL DE ALUNO/.test(norm(row.text))) { terminouTabela = true; break; }
                 const seq = cell(row, 0, xCod), codigo = cell(row,xCod,xNome);
                 if (/^\d+$/.test(seq)) {
                     if (!/^\d+$/.test(codigo)) throw Error('Código de aluno não reconhecido na sequência ' + seq + '.');
@@ -2089,11 +2106,12 @@
             }
         }
         if (!nomePdf || norm(nomePdf) !== norm(turma.nome)) throw Error('A turma no PDF não corresponde à turma solicitada.');
-        if (turma.turno && turma.turno !== 'NÃO INFORMADO' && norm(turnoPdf) !== norm(turma.turno)) throw Error('O turno no PDF não corresponde à turma solicitada.');
-        const schoolCode = turma.url.split('?')[1].split(',')[1];
+        if (turma.turno && !['NÃO INFORMADO','DESCONHECIDO'].includes(turma.turno) && norm(turnoPdf) !== norm(turma.turno)) throw Error('O turno no PDF não corresponde à turma solicitada.');
         if (!escola.startsWith(schoolCode + ' ')) throw Error('A escola no PDF não corresponde à escola consultada.');
-        if (!totais.length) throw Error('Total do rodapé não encontrado; contagem não confirmada.');
-        const totalPdf = totais.at(-1);
+        if (vaziaExplicita && (alunos.length || totais.some(n=>n!==0))) throw Error('O PDF mistura mensagem de turma vazia com alunos ou total positivo.');
+        if (!totais.length && !vaziaExplicita) throw Error('Total do rodapé não encontrado; contagem não confirmada.');
+        const totalPdf = totais.length ? totais.at(-1) : 0;
+        if (totais.some(n=>n!==totalPdf)) throw Error('Totais divergentes nas páginas do PDF.');
         if (totalPdf !== alunos.length) throw Error(`Conferência divergente: PDF informa ${totalPdf}, mas foram lidos ${alunos.length} alunos.`);
         const codigos = new Set(alunos.map(a=>a.codigo));
         if (codigos.size !== alunos.length) throw Error('O PDF contém códigos de alunos repetidos; confira a turma.');
@@ -2102,7 +2120,12 @@
         const naoPaed = alunos.filter(a=>a.paed==='NÃO').length;
         const indefinidos = alunos.length-paed-naoPaed;
         if (indefinidos) avisos.push(`${indefinidos} aluno(s) com PAED não identificado. Confira o PDF.`);
-        return {escola,alunos,total:alunos.length,paed,naoPaed,indefinidos,avisos};
+        const capacidade = /ENSINO FUNDAMENTAL/.test(norm(etapa)) ? 30 : /ENSINO MEDIO|PROFISSIONAL TECNICO|\bEPT\b/.test(norm(etapa+' '+turma.nome)) ? 35 : null;
+        const vagas = capacidade === null ? null : Math.max(0,capacidade-alunos.length);
+        const excedentes = capacidade === null ? 0 : Math.max(0,alunos.length-capacidade);
+        if (capacidade === null) avisos.push('Etapa de ensino não identificada; vagas não calculadas.');
+        if (excedentes) avisos.push(`${excedentes} aluno(s) acima da capacidade de ${capacidade}.`);
+        return {escola,etapa,capacidade,vagas,excedentes,alunos,total:alunos.length,paed,naoPaed,indefinidos,avisos};
     }
 
     let root, resultados=[], busy=false, cancelado=false, geradoEm='';
@@ -2145,7 +2168,7 @@
                     try {
                         const pages=[];
                         for(let p=1;p<=pdf.numPages;p++) pages.push((await (await pdf.getPage(p)).getTextContent()).items);
-                        Object.assign(r,analisarPdf(pages,r));r.situacao=r.indefinidos?'Conferir PAED':'Conferido';
+                        Object.assign(r,analisarPdf(pages,r));r.situacao=r.indefinidos?'Conferir PAED':r.excedentes?'Acima da capacidade':r.capacidade===null?'Conferir etapa':r.total===0?'Sem alunos':'Conferido';
                     } finally {await pdf.destroy();}
                 } catch(e) {r.situacao='Falha';r.erro=e.message;}
                 render();if(i<resultados.length-1&&!cancelado) await sleep(800);
@@ -2156,15 +2179,16 @@
     function resumoHtml() {
         const ok=resultados.filter(r=>Number.isInteger(r.total));
         const sum=field=>ok.reduce((n,r)=>n+r[field],0);
-        const completo=ok.length===resultados.length && ok.every(r=>!r.indefinidos);
+        const completo=ok.length===resultados.length && ok.every(r=>!r.indefinidos && r.capacidade!==null);
         return `<h2>Previsão de alunos por turma — ${esc(anoConsulta)}</h2>
             <p>${esc([...new Set(ok.map(r=>r.escola))].join(' • '))}</p>
             <p>${completo?'Relatório conferido':'RELATÓRIO PARCIAL / COM PENDÊNCIAS'} · ${ok.length}/${resultados.length} turmas lidas · ${esc(geradoEm)}</p>
             <p><strong>${sum('total')} alunos · ${sum('paed')} PAED · ${sum('naoPaed')} não PAED · ${sum('indefinidos')} não identificados</strong></p>
             <p>Totais somados por turma; um aluno previsto em mais de uma turma conta em cada uma. Inclui todos os alunos do PDF, independentemente da matrícula efetivada.</p>
-            <table><thead><tr><th>Turma</th><th>Turno</th><th>Total</th><th>PAED</th><th>Não PAED</th><th>Não identificado</th><th>Situação</th></tr></thead><tbody>
-            ${resultados.map(r=>`<tr><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.nome)}</a></td><td>${esc(r.turno)}</td><td>${r.total??'—'}</td><td>${r.paed??'—'}</td><td>${r.naoPaed??'—'}</td><td>${r.indefinidos??'—'}</td><td>${esc(r.situacao)}${r.erro?'<br>'+esc(r.erro):''}${r.avisos?.length?'<br>'+esc(r.avisos.join(' ')):''}</td></tr>`).join('')}
-            </tbody><tfoot><tr><th colspan="2">${completo?'Total':'Subtotal lido'}</th><th>${sum('total')}</th><th>${sum('paed')}</th><th>${sum('naoPaed')}</th><th>${sum('indefinidos')}</th><th>${ok.length}/${resultados.length} turmas</th></tr></tfoot></table>`;
+            <p>Vagas disponíveis = capacidade menos alunos previstos: 30 no fundamental e 35 no médio/EPT. Acima da capacidade, as vagas ficam em zero e o excedente é indicado.</p>
+            <table><thead><tr><th>Turma</th><th>Vagas disponíveis</th><th>Turno</th><th>Total</th><th>PAED</th><th>Não PAED</th><th>Não identificado</th><th>Situação</th></tr></thead><tbody>
+            ${resultados.map(r=>`<tr><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.nome)}</a></td><td>${r.vagas??'—'}</td><td>${esc(r.turno)}</td><td>${r.total??'—'}</td><td>${r.paed??'—'}</td><td>${r.naoPaed??'—'}</td><td>${r.indefinidos??'—'}</td><td>${esc(r.situacao)}${r.erro?'<br>'+esc(r.erro):''}${r.avisos?.length?'<br>'+esc(r.avisos.join(' ')):''}</td></tr>`).join('')}
+            </tbody><tfoot><tr><th>${completo?'Total':'Subtotal lido'}</th><th>${ok.some(r=>r.vagas!==null)?sum('vagas'):'—'}</th><th></th><th>${sum('total')}</th><th>${sum('paed')}</th><th>${sum('naoPaed')}</th><th>${sum('indefinidos')}</th><th>${ok.length}/${resultados.length} turmas</th></tr></tfoot></table>`;
     }
     function render() {
         $('#resumo').innerHTML=resultados.length?resumoHtml():'';
@@ -2172,12 +2196,12 @@
         for(const id of ['csv','csv-alunos','imprimir']) $('#'+id).disabled=busy||!resultados.length;
     }
     function csv(detalhado) {
-        const rows=detalhado?[['Ano','Turma','Turno','Código','Aluno','PAED']]:[['Ano','Turma','Turno','Total','PAED','Não PAED','Não identificado','Situação','Observação']];
+        const rows=detalhado?[['Ano','Turma','Turno','Código','Aluno','PAED']]:[['Ano','Turma','Vagas disponíveis','Turno','Total','PAED','Não PAED','Não identificado','Capacidade','Acima da capacidade','Situação','Observação']];
         for(const r of resultados) {
             if(detalhado) for(const a of r.alunos||[]) rows.push([anoConsulta,r.nome,r.turno,a.codigo,a.nome,a.paed]);
-            else rows.push([anoConsulta,r.nome,r.turno,r.total??'',r.paed??'',r.naoPaed??'',r.indefinidos??'',r.situacao,r.erro||r.avisos?.join(' ')||'']);
+            else rows.push([anoConsulta,r.nome,r.vagas??'',r.turno,r.total??'',r.paed??'',r.naoPaed??'',r.indefinidos??'',r.capacidade??'',r.excedentes??'',r.situacao,r.erro||r.avisos?.join(' ')||'']);
         }
-        const safe=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,"'    iniciarModuloAcoesLote();").replace(/"/g,'""')+'"';
+        const safe=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,c=>"'"+c).replace(/"/g,'""')+'"';
         const blob=new Blob(['\uFEFF'+rows.map(r=>r.map(safe).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'});
         const url=URL.createObjectURL(blob),a=document.createElement('a');
         a.href=url;a.download=`previsao-${anoConsulta}-${detalhado?'alunos-lidos':'resumo'}${resultados.some(r=>!r.alunos||r.indefinidos)?'-parcial':''}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
