@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
 // @namespace    http://tampermonkey.net/
-// @version      0.15.0
+// @version      0.16.0
 // @description  Arquivo Digital com consulta e inclusão de pastas, documentos, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.15.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.16.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -55,7 +55,7 @@
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.15.0'
+            versao: '0.16.0'
         }
     ]);
 
@@ -78,7 +78,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.15.0',
+        version: '0.16.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -1559,6 +1559,7 @@
         const records = [];
 
         for (const sheetName of workbook.SheetNames) {
+            if(normalizeText(sheetName)==='INICIO')continue;
             const ws = workbook.Sheets[sheetName];
             if (!ws?.['!ref']) continue;
 
@@ -1815,8 +1816,8 @@
 
             if (!results.length) {
                 const detail = singleTermMode
-                    ? `Nenhum nome contendo “${name}” foi encontrado online em ${root}.`
-                    : `Nenhuma correspondência encontrada online em ${root}.`;
+                    ? `Nenhum nome contendo “${name}” foi encontrado em ${root}.`
+                    : `Nenhuma correspondência encontrada em ${root}.`;
 
                 renderStudentLocationStatus(detail, 'warn');
                 return;
@@ -1831,7 +1832,7 @@
             if (singleTermMode && !data.scored) {
                 renderEmbeddedMatches(results);
                 renderStudentLocationStatus(
-                    `${results.length} registro(s) online contendo “${name}”. Selecione pela data de nascimento, caixa e linha.`,
+                    `${results.length} registro(s) contendo “${name}”. Selecione pela data de nascimento, caixa e linha.`,
                     'warn'
                 );
                 showMatchChooser(results);
@@ -1850,7 +1851,7 @@
 
             renderEmbeddedMatches(results);
             renderStudentLocationStatus(
-                `${results.length} possível(is) correspondência(s) encontradas no Google Sheets. Confira e selecione a correta.`,
+                `${results.length} possível(is) correspondência(s) encontradas na lista. Confira e selecione a correta.`,
                 'warn'
             );
             showMatchChooser(results);
@@ -1858,8 +1859,8 @@
         } catch (error) {
             if (!searchIsCurrent()) return;
             console.error(error);
-            renderStudentLocationStatus(`Falha na pesquisa online: ${error.message}`, 'warn');
-            addLog(`Pesquisa Google Sheets: ${error.message}`, 'error');
+            renderStudentLocationStatus(`Falha na pesquisa: ${error.message}`, 'warn');
+            addLog(`Pesquisa de alunos: ${error.message}`, 'error');
         } finally {
             if (searchId === state.searchSequence) {
                 state.searchBusy=false;refreshSearchControls();
@@ -1931,8 +1932,8 @@
         if (endpoint && token) {
             el.listStatus.className = 'status-card status-ok';
             el.listStatus.innerHTML = `
-                <strong>✓ Pesquisa online ativa</strong><br>
-                Fonte: <b>Google Sheets</b><br>
+                <strong>✓ ${xlsxSearchEnabled()?'Pesquisa local ativa':'Pesquisa disponível'}</strong><br>
+                Fonte: <b>${xlsxSearchEnabled()?'Cópia XLSX das planilhas':'Google Sheets'}</b><br>
                 Arquivo atual: <b>${escapeHtml(el.archiveRoot?.value || 'PERMANENTE')}</b><br>
                 <span class="tiny">Digite um nome ou parte dele e clique em Pesquisar.</span>
             `;
@@ -3060,6 +3061,7 @@
     }
 
     function drivePostJson(data) {
+        if(xlsxSearchEnabled()&&data.student&&data.action!=='registerStudent')data={...data,student:{...data.student,strictPosition:true}};
         const endpoint = GM_getValue(APP.driveEndpointKey, '').trim();
         const token = GM_getValue(APP.driveTokenKey, '').trim();
 
@@ -3460,13 +3462,45 @@
 
     async function clearSearchCache() {
         const key=await searchCacheKey();
+        state.xlsxReady={};
+        for(const root of ['PERMANENTE','FORMANDOS'])GM_setValue(key+':xlsx:'+root,null);
         for(const root of ['PERMANENTE','FORMANDOS']){const id=key+':index:'+root;bumpIndexGeneration(id);indexAttempts.delete(id);}
         GM_setValue(key, []); GM_setValue(key+':index:PERMANENTE',null); GM_setValue(key+':index:FORMANDOS',null);
     }
 
-    function serverSearchEnabled(){return GM_getValue('adig:searchMode','server')!=='local';}
+    function searchMode(){return GM_getValue('adig:searchMode:v2','xlsx');}
+    function xlsxSearchEnabled(){return searchMode()==='xlsx';}
+    function serverSearchEnabled(){return searchMode()==='server';}
+
+    async function downloadStudentWorkbook(root){
+        const scope=await searchCacheKey(),started=performance.now();
+        if(!window.XLSX)throw new Error('A biblioteca de leitura XLSX não carregou. Recarregue a página.');
+        const data=parseDriveResponse(await drivePostJson({action:'downloadStudentWorkbook',root}));
+        if(!data.ok)throw new Error(data.error||'Falha ao baixar a planilha. Atualize o Apps Script para 1.6.0.');
+        if(data.root!==root||typeof data.base64!=='string'||!data.base64.startsWith('UEs'))throw new Error('Resposta XLSX inválida. A lista anterior foi preservada.');
+        const workbook=XLSX.read(data.base64,{type:'base64',cellDates:true,cellFormula:true,cellStyles:false});
+        const records=indexWorkbook(workbook,root);
+        if(!records.length)throw new Error('Nenhum cadastro reconhecido em '+root+'. Confira os cabeçalhos; a lista anterior foi preservada.');
+        if(scope!==await searchCacheKey())throw new Error('A conexão mudou durante o download. Tente novamente.');
+        const snapshot={records,createdAt:Date.now(),elapsedMs:performance.now()-started,bytes:data.bytes};
+        GM_setValue(scope+':xlsx:'+root,snapshot);
+        state.xlsxScope=scope;state.xlsxReady=state.xlsxReady||{};state.xlsxReady[root]=true;
+        state.xlsxStats=state.xlsxStats||{};
+        state.xlsxStats[root]=root+': '+records.length+' nomes · download e leitura em '+(snapshot.elapsedMs/1000).toFixed(1)+' s';
+        if(el.cacheStatus)el.cacheStatus.textContent=Object.values(state.xlsxStats).join(' | ');
+        return snapshot;
+    }
+
+    async function searchWorkbookCache(payload,forceRefresh){
+        const scope=await searchCacheKey();
+        let snapshot=GM_getValue(scope+':xlsx:'+payload.root,null);
+        if(forceRefresh||state.xlsxScope!==scope||!state.xlsxReady?.[payload.root]||!snapshot)snapshot=await downloadStudentWorkbook(payload.root);
+        // A classificação e o limite dos resultados continuam no fluxo de pesquisa existente.
+        return {fromCache:true,responseText:JSON.stringify({ok:true,results:snapshot.records})};
+    }
 
     async function searchStudentsRequest(payload,forceRefresh=false){
+        if(xlsxSearchEnabled())return searchWorkbookCache(payload,forceRefresh);
         if(!serverSearchEnabled())return cachedStudentSearch(payload,forceRefresh);
         const started=performance.now();
         // Cada consulta vai ao servidor; o índice compartilhado nunca é baixado aqui.
@@ -3744,7 +3778,7 @@
     async function prepareSearchBackend() {
         state.indexSupported=false;state.changesSupported=false;
         if(!GM_getValue(APP.driveEndpointKey,'')||!GM_getValue(APP.driveTokenKey,''))return;
-        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));state.changesSupported=Boolean(data.ok&&data.capabilities?.includes('studentChanges'));if(state.indexSupported&&!serverSearchEnabled())queueIndexRefresh(el.archiveRoot.value);}
+        try{const data=parseDriveResponse(await drivePostJson({action:'ping'}));state.indexSupported=Boolean(data.ok&&data.capabilities?.includes('studentIndex'));state.changesSupported=Boolean(data.ok&&data.capabilities?.includes('studentChanges'));if(state.indexSupported&&searchMode()==='local')queueIndexRefresh(el.archiveRoot.value);}
         catch(error){console.warn('Não foi possível verificar o serviço:',error.message);}
     }
 
@@ -3769,6 +3803,10 @@
     }
 
     async function cacheRegisteredStudent(student) {
+        if(xlsxSearchEnabled()){
+            // Inserir linhas pode deslocar outros cadastros; descarte a prontidão da cópia.
+            if(state.xlsxReady)state.xlsxReady[student.root]=false;
+        }
         const key=await searchCacheKey(),id=key+':index:'+student.root,index=GM_getValue(id,null);
         bumpIndexGeneration(id);indexAttempts.delete(id);
         GM_setValue(key,[]);
@@ -3804,7 +3842,7 @@
     }
 
     async function queueIndexRefresh(root) {
-        if(serverSearchEnabled())return;
+        if(searchMode()!=='local')return;
         try{
             if(!state.indexSupported)return;
             const key=await searchCacheKey(),id=key+':index:'+root,index=GM_getValue(id,null),now=Date.now();
@@ -3917,6 +3955,18 @@
 
     async function ensureInitialStudentIndexes(report=()=>{}) {
         if(!GM_getValue(APP.driveEndpointKey,'')||!GM_getValue(APP.driveTokenKey,''))throw new Error('Configure a conexão com o Google Drive para preparar as listas.');
+        if(xlsxSearchEnabled()){
+            const scope=await searchCacheKey();
+            if(state.xlsxScope!==scope){state.xlsxReady={};state.xlsxStats={};state.xlsxScope=scope;}
+            for(const root of ['PERMANENTE','FORMANDOS']){
+                report(root,0,false);
+                const snapshot=state.xlsxReady?.[root]?GM_getValue(scope+':xlsx:'+root,null):null;
+                const updated=snapshot||await downloadStudentWorkbook(root);
+                if(scope!==await searchCacheKey())throw new Error('A conexão mudou. Tente novamente.');
+                report(root,updated.records.length,true);
+            }
+            return;
+        }
         const key=await searchCacheKey(),roots=['PERMANENTE','FORMANDOS'];
         for(const root of roots){
             let index=GM_getValue(key+':index:'+root,null);
@@ -3950,13 +4000,13 @@
         if(!overlay){
             overlay=document.createElement('div');overlay.id=`${APP.id}-index-loading`;overlay.className='ad-index-loading';
             overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-labelledby',`${APP.id}-index-title`);
-            overlay.innerHTML=`<section><h1 id="${APP.id}-index-title">Carregando o sistema</h1><p>Preparando as listas neste computador. No primeiro acesso, isso pode levar alguns minutos.</p><ul><li data-root="PERMANENTE">◌ Permanente · verificando índice</li><li data-root="FORMANDOS">◌ Formandos · verificando índice</li></ul><p class="index-message" role="status">O sistema será liberado quando os dois índices estiverem prontos.</p><div class="index-actions" hidden><button type="button" class="index-retry">Tentar novamente</button><button type="button" class="index-config">Configurar conexão</button></div></section>`;
+            overlay.innerHTML=`<section><h1 id="${APP.id}-index-title">Carregando o sistema</h1><p>Preparando as listas neste computador. Aguarde a conclusão dos dois arquivos.</p><ul><li data-root="PERMANENTE">◌ Permanente · verificando lista</li><li data-root="FORMANDOS">◌ Formandos · verificando lista</li></ul><p class="index-message" role="status">O sistema será liberado quando as duas listas estiverem prontas.</p><div class="index-actions" hidden><button type="button" class="index-retry">Tentar novamente</button><button type="button" class="index-config">Configurar conexão</button></div></section>`;
             overlay.querySelector('section').prepend(createLoadingSpinner());document.body.append(overlay);
             overlay.querySelector('.index-retry').onclick=initializeStudentIndexes;
             overlay.querySelector('.index-config').onclick=configureDriveEndpoint;
         }
         overlay.querySelector('.index-actions').hidden=true;overlay.classList.remove('has-error');
-        overlay.querySelector('.index-message').textContent='O sistema será liberado quando os dois índices estiverem prontos.';
+        overlay.querySelector('.index-message').textContent='O sistema será liberado quando as duas listas estiverem prontas.';
         el.app.inert=true;setBusy(true);
         state.indexBootProgress=(root,count,ready)=>{
             const line=overlay.querySelector(`[data-root="${root}"]`);
@@ -3968,7 +4018,7 @@
                 overlay.remove();state.initialIndexCheckPending=false;el.app.inert=false;setBusy(false);renderConsultStudentHero();
                 if(state.workspaceTab==='incluir'&&!state.workspacePreloaded){state.workspacePreloaded=true;queueMicrotask(preloadArchiveSystem);}
             }catch(error){
-                overlay.classList.add('has-error');overlay.querySelector('.index-message').textContent=error.message+' Os índices já concluídos foram preservados.';
+                overlay.classList.add('has-error');overlay.querySelector('.index-message').textContent=error.message+' As listas já concluídas foram preservadas.';
                 overlay.querySelector('.index-actions').hidden=false;overlay.querySelector('.index-retry').focus();
             }finally{state.indexBootPromise=null;state.indexBootProgress=null;}
         })();
@@ -4016,17 +4066,24 @@
         searchSettings.querySelector('p').textContent='No modo servidor, envie apenas o nome e receba as correspondências. A porcentagem indica semelhança do nome; confira nascimento e caixa. Neste teste, a primeira consulta sem cache no Google pode levar alguns minutos; as seguintes reaproveitam a lista compartilhada.';
         const modeLabel=document.createElement('label');modeLabel.textContent='Modo de pesquisa';modeLabel.htmlFor=`${APP.id}-search-mode`;
         el.searchMode=document.createElement('select');el.searchMode.id=modeLabel.htmlFor;
-        el.searchMode.innerHTML='<option value="server">Busca no servidor (teste)</option><option value="local">Índices neste computador (modo anterior)</option>';
-        el.searchMode.value=serverSearchEnabled()?'server':'local';
+        el.searchMode.innerHTML='<option value="xlsx">Download das planilhas XLSX (teste)</option><option value="server">Busca no servidor</option><option value="local">Índices neste computador (modo anterior)</option>';
+        el.searchMode.value=searchMode();
         const timing=document.createElement('p');timing.className='search-timing';timing.setAttribute('role','status');
         searchSettings.insertBefore(modeLabel,options);searchSettings.insertBefore(el.searchMode,options);searchSettings.append(timing);
         const applySearchMode=()=>{
-            const server=serverSearchEnabled();options.hidden=server;timing.hidden=!server;
-            (server?timing:options).append(el.cacheStatus);
-            el.cacheStatus.textContent=server?'Consultas no Google · sem sincronização inicial neste computador.':'Busca local · atualização automática em segundo plano.';
+            const local=searchMode()==='local';options.hidden=!local;timing.hidden=local;
+            (local?options:timing).append(el.cacheStatus);
+            el.cacheStatus.textContent=xlsxSearchEnabled()?'Planilhas baixadas ao abrir · pesquisa local · conferência online antes de gravar.':serverSearchEnabled()?'Consultas no Google · sem sincronização inicial neste computador.':'Busca local · atualização automática em segundo plano.';
+            searchSettings.querySelector('p').textContent=xlsxSearchEnabled()?'Baixa Permanente e Formandos em XLSX ao abrir a página. As consultas seguintes usam a cópia local. Se uma linha mudar, atualize as listas e selecione a pessoa novamente.':'Modos anteriores disponíveis para comparação de desempenho.';
+            downloadButton.hidden=!xlsxSearchEnabled();
+        };
+        const downloadButton=document.createElement('button');downloadButton.textContent='Baixar listas novamente';downloadButton.type='button';searchSettings.append(downloadButton);
+        downloadButton.onclick=()=>{
+            if(state.processing||state.searchBusy||state.indexBootPromise)return;
+            state.xlsxReady={};state.selectedStudentMatch=null;state.lastSearchResults=[];el.searchResults.innerHTML='';renderStudentLocationStatus();initializeStudentIndexes();
         };
         el.searchMode.onchange=()=>{
-            GM_setValue('adig:searchMode',el.searchMode.value);state.searchSequence=(state.searchSequence||0)+1;
+            GM_setValue('adig:searchMode:v2',el.searchMode.value);state.searchSequence=(state.searchSequence||0)+1;
             state.selectedStudentMatch=null;state.lastSearchResults=[];el.searchResults.innerHTML='';renderStudentLocationStatus();
             applySearchMode();initializeStudentIndexes();
         };

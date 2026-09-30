@@ -1,11 +1,11 @@
 /**
- * Arquivo Digital — serviço Google Apps Script 1.5.0.
+ * Arquivo Digital — serviço Google Apps Script 1.6.0.
  * Configure API_TOKEN, ROOT_PERMANENTE, ROOT_FORMANDOS,
  * SHEET_PERMANENTE e SHEET_FORMANDOS nas Propriedades do script.
  * Não publique chaves ou configurações privadas no repositório.
  */
 const CONFIG = Object.freeze({
-  VERSION: '1.5.0',
+  VERSION: '1.6.0',
   API_TOKEN: PropertiesService.getScriptProperties().getProperty('API_TOKEN') || '',
   ROOT_FOLDERS: Object.freeze({
     PERMANENTE: PropertiesService.getScriptProperties().getProperty('ROOT_PERMANENTE') || '',
@@ -17,7 +17,7 @@ const CONFIG = Object.freeze({
   }),
   LINK_HEADER: 'PASTA DIGITAL', LINK_TEXT: '📁 Pasta Digital', MAX_BASE64_CHARS: 12 * 1024 * 1024
 });
-const BACKEND_VERSION = '1.5.0';
+const BACKEND_VERSION = '1.6.0';
 const INDEX_TTL_SECONDS = 900;
 
 function doGet() { return json_({ok:true,service:'Arquivo Digital',version:BACKEND_VERSION}); }
@@ -25,12 +25,31 @@ function doPost(e) {
   try {
     const payload=JSON.parse(e && e.postData && e.postData.contents || '{}');
     authorize_(payload);
+    if(payload.action==='downloadStudentWorkbook')return json_(downloadStudentWorkbookAction_(payload));
     const handlers={ping:()=>({ok:true,message:'Arquivo Digital conectado.',version:BACKEND_VERSION,capabilities:['studentIndex','idempotentUpload','parallelFolders','studentRegistration','studentChanges']}),getStudentChanges:getStudentChangesAction_,listBoxes:listBoxesAction_,registerStudent:registerStudentAction_,verifyStudent:verifyStudentAction_,searchStudents:searchStudentsAction_,getStudentIndex:getStudentIndexAction_,ensureStudentFolder:ensureStudentFolderAction_,uploadDocument:uploadDocumentAction_,listStudentDocuments:listStudentDocumentsAction_,getStudentDocument:getStudentDocumentAction_};
     if(!Object.prototype.hasOwnProperty.call(handlers,payload.action))throw new Error('Ação não reconhecida.');
     return json_(handlers[payload.action](payload));
   }catch(error){console.error(error.message);return json_({ok:false,error:error.message || String(error),code:error.code || 'ERROR',retryable:error.code==='BUSY'});}
 }
 function authorize_(payload){if(!CONFIG.API_TOKEN || !payload || payload.token!==CONFIG.API_TOKEN)throw new Error('Chave de acesso inválida.');}
+// Exporta o arquivo inteiro, sem percorrer as abas com SpreadsheetApp.
+function downloadStudentWorkbookAction_(payload){
+  const started=Date.now(),root=root_(payload.root);
+  const mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const response=UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(CONFIG.SPREADSHEETS[root])+'/export?mimeType='+encodeURIComponent(mime),{
+    headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},muteHttpExceptions:true
+  });
+  if(response.getResponseCode()!==200)throw new Error('Não foi possível exportar '+root+' (HTTP '+response.getResponseCode()+'). Confira a autorização do serviço e o limite de exportação de 10 MB.');
+  const bytes=response.getBlob().getBytes();
+  if(bytes.length<4||bytes[0]!==80||bytes[1]!==75)throw new Error('O Google não retornou um arquivo XLSX válido.');
+  return {ok:true,root,base64:Utilities.base64Encode(bytes),bytes:bytes.length,exportedAt:Date.now(),elapsedMs:Date.now()-started};
+}
+function testarDownloadPlanilhas(){
+  for(const root of ['PERMANENTE','FORMANDOS']){
+    const result=downloadStudentWorkbookAction_({root});
+    console.log(JSON.stringify({root,bytes:result.bytes,elapsedMs:result.elapsedMs}));
+  }
+}
 function json_(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);}
 function normalize_(v){return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();}
 function normalizeBirth_(value){
@@ -223,10 +242,17 @@ function getStudentChangesAction_(payload){
 
 function validateStudent_(value){
   const s=value||{},root=root_(s.root),name=String(s.name||'').trim();if(!name)throw new Error('Nome do aluno não informado.');
-  return {root,name,code:String(s.code||'').trim(),birth:normalizeBirth_(s.birth),physicalSheet:String(s.physicalSheet||'').trim(),physicalRow:Number(s.physicalRow||0),existingFolderUrl:String(s.existingFolderUrl||'').trim()};
+  return {root,name,code:String(s.code||'').trim(),birth:normalizeBirth_(s.birth),physicalSheet:String(s.physicalSheet||'').trim(),physicalRow:Number(s.physicalRow||0),existingFolderUrl:String(s.existingFolderUrl||'').trim(),strictPosition:s.strictPosition===true};
 }
 function resolveStudentRow_(sheet,student,columns){
   if(!columns.headerRow||!columns.nameCol)throw new Error('Cabeçalho da aba não identificado. Nenhuma célula foi alterada.');
+  if(student.strictPosition){
+    const row=student.physicalRow;
+    if(!Number.isInteger(row)||row<=columns.headerRow||row>sheet.getLastRow())throw staleStudent_();
+    const values=sheet.getRange(row,1,1,Math.max(columns.nameCol,columns.birthCol||0)).getDisplayValues()[0];
+    if(normalize_(values[columns.nameCol-1])!==normalize_(student.name)||normalizeBirth_(columns.birthCol?values[columns.birthCol-1]:'')!==student.birth)throw staleStudent_();
+    return row;
+  }
   const count=sheet.getLastRow()-columns.headerRow;if(count<=0)throw new Error('Aba sem alunos.');
   const values=sheet.getRange(columns.headerRow+1,1,count,Math.max(columns.nameCol,columns.birthCol)).getDisplayValues();
   const matches=[];
@@ -238,6 +264,7 @@ function resolveStudentRow_(sheet,student,columns){
   if(matches.length!==1)throw new Error(matches.length?'Há homônimos nesta aba; confirme os dados do aluno.':'O aluno não corresponde à aba/data informada. Pesquise novamente.');
   return matches[0];
 }
+function staleStudent_(){const error=new Error('O cadastro online diverge da lista baixada. Nenhuma alteração foi autorizada. Atualize as listas e selecione o aluno novamente.');error.code='STALE_STUDENT';return error;}
 function studentFolderName_(s){return sanitizeFileName_(s.name).replace(/_/g,' ').trim()+' - '+(s.birth?s.birth.replace(/\//g,'-'):'SEM-DATA');}
 function folderFromUrl_(url){const m=String(url||'').match(/^https:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([A-Za-z0-9_-]+)/);if(!m)return null;try{return DriveApp.getFolderById(m[1]);}catch(_){return null;}}
 function assertFolderIsArchiveChild_(folder,root){const parents=folder.getParents();while(parents.hasNext()){if(parents.next().getId()===CONFIG.ROOT_FOLDERS[root])return;}throw new Error('A pasta não pertence ao arquivo selecionado.');}

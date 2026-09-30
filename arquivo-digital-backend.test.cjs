@@ -19,6 +19,24 @@ test('reserva abandonada expira e pode ser retomada',()=>{
  const {c,props}=fixture();props.set('ad:lease:'+c.hash_('aluno-A'),JSON.stringify({owner:'old',expires:Date.now()-1}));assert.equal(c.withFolderLease_('aluno-A',()=>true),true);
 });
 function sheet(rows){return {getLastRow:()=>rows.length,getRange:(r,c,n=1,m=1)=>({getDisplayValues:()=>rows.slice(r-1,r-1+n).map(row=>row.slice(c-1,c-1+m))})};}
+
+test('XLSX: posição estrita aceita linha atual e bloqueia deslocamento ou nascimento diferente',()=>{
+ const {c}=fixture(),columns={headerRow:1,nameCol:1,birthCol:2};
+ const sh=sheet([['NOME','NASCIMENTO'],['OUTRO','01/01/2000'],['ALUNO TESTE','02/02/2001']]);
+ const student={name:'ALUNO TESTE',birth:'02/02/2001',strictPosition:true,physicalRow:3};
+ assert.equal(c.resolveStudentRow_(sh,student,columns),3);
+ for(const change of [{physicalRow:2},{physicalRow:99},{physicalRow:1},{birth:''},{birth:'03/02/2001'}])assert.throws(()=>c.resolveStudentRow_(sh,{...student,...change},columns),e=>e.code==='STALE_STUDENT');
+});
+
+test('exportação usa somente a planilha configurada, valida ZIP e não vaza erro OAuth',()=>{
+ const {c}=fixture();let status=200,bytes=[80,75,3,4],url;
+ c.ScriptApp={getOAuthToken:()=> 'secret-test'};c.Utilities.base64Encode=v=>Buffer.from(v).toString('base64');
+ c.UrlFetchApp={fetch:(u,options)=>{url=u;assert.equal(options.headers.Authorization,'Bearer secret-test');return {getResponseCode:()=>status,getBlob:()=>({getBytes:()=>bytes})};}};
+ assert.equal(c.downloadStudentWorkbookAction_({root:'PERMANENTE',fileId:'untrusted'}).base64,'UEsDBA==');
+ assert.ok(url.includes('/sheet-p/export?'));assert.ok(!url.includes('untrusted'));
+ status=403;assert.throws(()=>c.downloadStudentWorkbookAction_({root:'PERMANENTE'}),/HTTP 403/);
+ status=200;bytes=[60,104,116,109];assert.throws(()=>c.downloadStudentWorkbookAction_({root:'PERMANENTE'}),/XLSX válido/);
+});
 test('linha antiga é resolvida pelo nome e nascimento atuais',()=>{
  const {c}=fixture();const sh=sheet([['NOME','NASCIMENTO'],['OUTRO','01/01/2000'],['ALUNO TESTE','02/02/2001']]);assert.equal(c.resolveStudentRow_(sh,{name:'Aluno Teste',birth:'02/02/2001',physicalRow:2},{headerRow:1,nameCol:1,birthCol:2}),3);
 });

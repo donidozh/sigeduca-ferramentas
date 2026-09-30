@@ -6,12 +6,12 @@ const { webcrypto, createHash } = require('node:crypto');
 const source = fs.readFileSync(require('node:path').join(__dirname, 'ged/arquivo-digital-aluno.user.js'), 'utf8');
 
 function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
-  const values = new Map([['adig:searchMode','local'],['adig01:driveEndpoint','https://script.google.com/macros/s/test-only/exec'],['adig01:driveToken','test-only']]);
+  const values = new Map([['adig:searchMode:v2','local'],['adig01:driveEndpoint','https://script.google.com/macros/s/test-only/exec'],['adig01:driveToken','test-only']]);
   let calls = 0;
   const window = { addEventListener(){},dispatchEvent(){} }; window.top=window.self=window;
   const context = { window, document:{title:'Test'},location:{pathname:'/',hash:''},queueMicrotask(){},setTimeout(){},clearTimeout(){},console,TextEncoder,crypto:webcrypto,performance,URL,CustomEvent:class{},CSS:{escape:x=>x},GM_getValue:(k,d)=>values.has(k)?values.get(k):d,GM_setValue:(k,v)=>values.set(k,v),GM_xmlhttpRequest: opts=>{calls++; Promise.resolve(respond(JSON.parse(opts.data))).then(data=>opts.onload({status:200,responseText:JSON.stringify(data)}));} };
   Object.assign(context,overrides);
-  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={openConsultPreview,closeConsultPreview,searchStudentsRequest,ensureInitialStudentIndexes,syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
+  const exposed = source.replace(/\}\)\(\);\s*$/, `globalThis.testing={drivePostJson,downloadStudentWorkbook,searchWorkbookCache,indexWorkbook,openConsultPreview,closeConsultPreview,searchStudentsRequest,ensureInitialStudentIndexes,syncStudentIndex,loadConsultDocuments,selectWorkspaceTab,cacheRegisteredStudent,refreshStudentIndex,downloadStudentIndex,queueIndexRefresh,hasRegisteredSelection,duplicatePageModel,makeDocumentOptions,detectDocumentTitle,normalizeDriveEndpoint,driveHttpError,gmPostJson,parseDriveResponse,createRequestId,sha256Hex,fileSha256,classifyText,normalizeLoose,isDestinationDone,summarizeDestinations,cachedStudentSearch,searchCacheKey,clearSearchCache,pageNeedsReview,state,el,acceptAiSuggestions,rememberEdit,SEARCH_CACHE_TTL,refreshSelectedStudent,documentOcrSuggestion,formatBirthDigits,isValidBirth,refreshSearchControls};})();`);
   vm.runInNewContext(exposed,context);
   return {...context.testing,values,calls:()=>calls};
 }
@@ -19,6 +19,36 @@ function fixture(respond = () => ({ ok: true, results: [] }), overrides={}) {
 test('classificação: palavras curtas não correspondem a trechos de outras palavras',()=>{
  const t=fixture(); const r=t.classifyText('documento de organização de arquivos para a secretaria escolar');
  assert.ok(!r.hits.includes('rg'));
+});
+
+function workbookFixture(respond){
+ const wb={SheetNames:['INÍCIO','A1'],Sheets:{'INÍCIO':{'!ref':'A1:B2',A1:{v:'Nome'},A2:{v:'MENU IGNORADO'}},A1:{'!ref':'A1:C3',A1:{v:'Nome'},B1:{v:'Data de nascimento'},C1:{v:'Pasta Digital'},A3:{v:'ALUNO TESTE'},B3:{v:'02/02/2001'},C3:{v:'Pasta',l:{Target:'https://drive.google.com/drive/folders/test'}}}}};
+ const XLSX={read:()=>wb,utils:{decode_range:()=>({s:{r:0,c:0},e:{r:2,c:2}}),encode_cell:({r,c})=>String.fromCharCode(65+c)+(r+1)}};
+ const t=fixture(respond,{XLSX,window:{XLSX,addEventListener(){},dispatchEvent(){}}});t.values.set('adig:searchMode:v2','xlsx');return t;
+}
+
+test('XLSX exige posição estrita nas operações existentes, sem interferir no cadastro novo',async()=>{
+ const payloads=[],t=workbookFixture(p=>{payloads.push(p);return {ok:true};});
+ const student={root:'PERMANENTE',name:'ALUNO TESTE',birth:'02/02/2001',physicalRow:3,physicalSheet:'A1'};
+ for(const action of ['verifyStudent','ensureStudentFolder','uploadDocument'])await t.drivePostJson({action,student});
+ await t.drivePostJson({action:'registerStudent',student});
+ assert.ok(payloads.slice(0,3).every(p=>p.student.strictPosition===true&&p.student.physicalRow===3));assert.equal(payloads[3].student.strictPosition,undefined);assert.equal(student.strictPosition,undefined);
+});
+
+test('XLSX: baixa os dois arquivos, preserva linhas vazias e pesquisa sem nova chamada',async()=>{
+ const actions=[];const t=workbookFixture(p=>{actions.push(p.action);return {ok:true,root:p.root,base64:'UEsDBA==',bytes:4};});
+ await t.ensureInitialStudentIndexes();assert.deepEqual(actions,['downloadStudentWorkbook','downloadStudentWorkbook']);
+ const result=JSON.parse((await t.searchStudentsRequest({root:'PERMANENTE',query:'ALUNO'})).responseText);
+ assert.equal(result.results.length,1);assert.equal(result.results[0].row,3);assert.equal(result.results[0].birth,'02/02/2001');assert.equal(result.results[0].folderUrl,'https://drive.google.com/drive/folders/test');assert.equal(t.calls(),2);
+ await t.searchStudentsRequest({root:'PERMANENTE',query:'ALUNO'},true);assert.equal(t.calls(),3);
+ t.state.xlsxReady={};await t.ensureInitialStudentIndexes();assert.equal(t.calls(),5);
+});
+
+test('XLSX: falha não apaga cópia anterior e mudança de credencial não reutiliza lista',async()=>{
+ let fail=false;const t=workbookFixture(p=>fail?{ok:false,error:'exportação indisponível'}:{ok:true,root:p.root,base64:'UEsDBA=='});
+ await t.downloadStudentWorkbook('PERMANENTE');const key=await t.searchCacheKey(),before=t.values.get(key+':xlsx:PERMANENTE');fail=true;
+ await assert.rejects(t.downloadStudentWorkbook('PERMANENTE'),/indisponível/);assert.equal(t.values.get(key+':xlsx:PERMANENTE'),before);
+ t.values.set('adig01:driveToken','other');await assert.rejects(t.searchStudentsRequest({root:'PERMANENTE',query:'ALUNO'}),/indisponível/);
 });
 test('classificação: normalização não conta duas vezes a mesma expressão',()=>{
  const t=fixture(); const r=t.classifyText('CERTIDÃO DE NASCIMENTO registro civil nascimento');
@@ -251,7 +281,7 @@ test('índices completos abrem sem conexão e falta de configuração não liber
 
 test('modo servidor não espera índice local nem envia pedido de reconstrução',async()=>{
  const calls=[];const t=fixture(p=>{calls.push(p);return {ok:true,scored:true,results:[{name:'MARIA',score:.9}],elapsedMs:7,indexCacheHit:true};});
- t.values.set('adig:searchMode','server');t.state.backendReady=new Promise(()=>{});t.el.cacheStatus={};
+ t.values.set('adig:searchMode:v2','server');t.state.backendReady=new Promise(()=>{});t.el.cacheStatus={};
  const result=await t.searchStudentsRequest({action:'searchStudents',root:'PERMANENTE',query:'MRIA'},true);
  assert.equal(calls.length,1);assert.equal(calls[0].action,'searchStudents');assert.equal(calls[0].forceRefresh,false);assert.equal(JSON.parse(result.responseText).results[0].score,.9);
  await t.queueIndexRefresh('FORMANDOS');assert.equal(calls.length,1);

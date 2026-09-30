@@ -1,4 +1,14 @@
-# Arquivo Digital 0.15.0
+# Arquivo Digital 0.16.0
+
+**Teste XLSX (padrão na 0.16.0):** ao abrir a página, o serviço exporta Permanente e Formandos pela API do Drive. O navegador lê as duas planilhas com XLSX e guarda os registros em cache, separado por conexão. A abertura aguarda as duas listas; as pesquisas seguintes são locais. Não há leitura aba por aba pelo Apps Script nem prazo de 15 minutos para essa cópia. Ao recarregar a página, as listas são baixadas novamente. A cópia anterior só é substituída depois da leitura válida, e falhas não liberam a abertura com dados antigos silenciosamente.
+
+Em **Configurações → Baixar listas novamente**, atualize as duas cópias e refaça a seleção. **Modo de pesquisa** permite voltar ao servidor ou à sincronização antiga. Após um cadastro, a cópia daquele arquivo é renovada na próxima pesquisa. Alterações feitas por outro computador ou manualmente aparecem na próxima atualização.
+
+O backend **1.6.0** é obrigatório para o teste. A exportação usa a autorização do proprietário, mantém o token no servidor e não muda o compartilhamento. A API de exportação limita cada arquivo a 10 MB. Medição real em 30/09/2026: Permanente 1.142.816 bytes em 1.769 ms; Formandos 838.275 bytes em 1.193 ms. Estes são os tempos da exportação no servidor, sem transferência ao navegador ou leitura local.
+
+Teste completo com o backend implantado e a interface no navegador (requisições encaminhadas por um relay local de teste): Permanente 16.368 registros em 7,3 s; Formandos 7.862 em 6,0 s. A pesquisa por MARIA exibiu 150 candidatos sem chamar searchStudents/getStudentIndex. Os tempos dependem da conexão e do computador e não garantem o mesmo desempenho no Tampermonkey.
+
+Neste modo, a conferência online exige a mesma aba, linha, nome e nascimento antes de preparar a pasta/enviar. Uma linha deslocada, removida ou com dados diferentes é recusada, sem procurar outra posição automaticamente. Não existe identificador permanente para distinguir cadastros com nome e nascimento idênticos. As travas do serviço também não impedem edição manual simultânea no Sheets; a conferência não é uma transação com a interface do Google.
 
 **Teste de busca no servidor (padrão na 0.15.0):** a tela abre sem construir ou baixar índices locais. Cada pesquisa envia somente nome, nascimento e arquivo ao Apps Script e recebe até 150 candidatos. O servidor calcula a semelhança do nome (incluindo pequenos erros de digitação), prioriza nome exato e nascimento correspondente e devolve as pontuações. A porcentagem não é uma probabilidade de identidade.
 
