@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Ferramentas - Ações em Lote (Turmas)
 // @namespace    http://tampermonkey.net/
-// @version      4.3.4
+// @version      4.4.0
 // @description  Módulo Ferramentas para ações em lote por turma, com atualização automática, envio das relações, dados pessoais, atestados, impressão e cópia de códigos.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -25,7 +25,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.3.4',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '4.4.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js'
     });
@@ -428,12 +428,13 @@
     }
 
     function agendarRetomadaAutomatica() {
+        if (document.getElementById('acao-lote')?.value === 'previsao_alunos') return;
         const checkpoint = carregarCheckpoint();
         if (!checkpoint || !retomadaAutomatica || isRodando) return;
 
         addLog(`🔄 Checkpoint encontrado. Retomada automática em 4 segundos: ${resumoCheckpoint(checkpoint)}.`, '#6f42c1');
         setTimeout(() => {
-            if (!isRodando && carregarCheckpoint()) retomarProcessoSalvo();
+            if (!isRodando && document.getElementById('acao-lote')?.value !== 'previsao_alunos' && carregarCheckpoint()) retomarProcessoSalvo();
         }, 4000);
     }
 
@@ -669,8 +670,13 @@
                 <option value="atestados">🩺 Extrair Atestados p/ Planilha</option>
                 <option value="dados_pessoais">👤 Enviar Dados Pessoais p/ Planilha</option>
                 <option value="copiar_codigos">📋 Copiar códigos dos alunos</option>
+                <option value="previsao_alunos">📊 Previsão de alunos por turma (PAED)</option>
             </select>
 
+            <div id="opcoes-previsao-lote" hidden style="margin-bottom:10px; padding:10px; background:#edf4fc; border-radius:4px;">
+                <label>Ano da previsão: <input id="ano-previsao-lote" type="number" value="2027" min="2000" max="2099" style="width:85px; padding:5px;"></label>
+                <p style="margin:6px 0 0">Clique em Buscar turmas para previsão, selecione as turmas acima e gere o relatório de total de alunos e PAED.</p>
+            </div>
             <button type="button" id="btn-iniciar-lote" style="width: 100%; padding: 12px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; opacity: 0.5;" disabled>2. Iniciar Processo 🚀</button>
 
             <textarea id="codigos-copiados-lote" readonly
@@ -740,10 +746,13 @@
             trilho.style.transform = "translateX(0)";
         };
 
-        document.getElementById('btn-mapear').onclick = atualizarTurmas;
+        document.getElementById('btn-mapear').onclick = () => document.getElementById('acao-lote').value === 'previsao_alunos' ? previsaoLote.buscar() : atualizarTurmas();
         document.getElementById('btn-exportar-links-lote').onclick = exportarLinksDasTurmas;
         document.getElementById('btn-iniciar-lote').onclick = () => executarAcaoLoteSelecionada();
-        document.getElementById('acao-lote').addEventListener('change', atualizarTextoBotaoAcao);
+        document.getElementById('acao-lote').addEventListener('change', () => {
+            previsaoLote.ativar(document.getElementById('acao-lote').value === 'previsao_alunos');
+            atualizarTextoBotaoAcao();
+        });
         document.getElementById('btn-retomar-checkpoint').onclick = retomarProcessoSalvo;
         document.getElementById('btn-descartar-checkpoint').onclick = () => {
             if (confirm('Descartar o checkpoint salvo? O próximo processo começará do início.')) {
@@ -919,13 +928,15 @@
             sheets: '2. Enviar Turmas 🚀',
             atestados: '2. Extrair Atestados 🩺',
             dados_pessoais: '2. Enviar Dados Pessoais 👤',
-            copiar_codigos: '2. Copiar Códigos 📋'
+            copiar_codigos: '2. Copiar Códigos 📋',
+            previsao_alunos: '2. Gerar previsão de alunos 📊'
         };
         btn.textContent = rotulos[seletor.value] || '2. Iniciar Processo 🚀';
     }
 
     function executarAcaoLoteSelecionada() {
         const acao = document.getElementById('acao-lote')?.value || '';
+        if (acao === 'previsao_alunos') return previsaoLote.gerar();
         if (acao === 'copiar_codigos') {
             return copiarCodigosDasTurmasSelecionadas();
         }
@@ -2002,6 +2013,302 @@
             iniciar();
         }
     }
+
+    // Previsão integrada ao dropdown e à seleção de turmas do próprio lote.
+    const previsaoLote = (() => {
+    const norm = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Preserva os identificadores da turma retornada em 2027. Nunca transforma
+    // uma turma de outro ano em turma de 2027 apenas trocando o ano na URL.
+    function urlPrevisao(raw, ano, origin) {
+        const url = new URL(raw.replace(/&amp;/g, '&'), origin + '/ged/');
+        if (url.origin !== origin || !/\/ged\/arr(?:previsaoalunosturma|alunossituacao)\.aspx$/i.test(url.pathname)) throw Error('Link de turma inválido.');
+        const parts = url.search.slice(1).split(',');
+        if (parts.length < 7 || parts.slice(0, 7).some(p => !p) || parts[0] !== String(ano)) throw Error('A grade ainda contém turmas de outro ano. Consulte o ano desejado no GED.');
+        return origin + '/ged/arrprevisaoalunosturma.aspx?' + [...parts.slice(0, 7), '0', '0', '0'].join(',');
+    }
+
+    // PDF.js retorna textos na ordem de desenho. Agrupar por posição evita
+    // confundir PAED com a situação da matrícula e permite nomes em duas linhas.
+    function linhasPdf(items) {
+        const rows = [];
+        for (const item of items.filter(i => i.str?.trim()).sort((a,b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4])) {
+            const y = item.transform[5];
+            let row = rows.find(r => Math.abs(r.y - y) <= 2.2);
+            if (!row) rows.push(row = { y, items: [] });
+            row.items.push({ text: item.str.trim(), x: item.transform[4] });
+        }
+        return rows.map(r => ({...r, items:r.items.sort((a,b) => a.x-b.x), text:r.items.sort((a,b) => a.x-b.x).map(i=>i.text).join(' ')}));
+    }
+
+    function analisarPdf(pages, turma) {
+        const alunos = [], totais = [], avisos = [];
+        let escola = '', nomePdf = '', turnoPdf = '';
+        for (const items of pages) {
+            const rows = linhasPdf(items);
+            const full = norm(rows.map(r=>r.text).join(' '));
+            if (!full.includes('PREVISAO DE ALUNOS NA TURMA')) throw Error('O arquivo não é um relatório de previsão de alunos.');
+            const school = rows.find(r=>/\d+\s*-\s*.+/.test(r.text) && r.items.some(i=>/^\d+\s*-\s*/.test(i.text)));
+            if (school) escola = school.items.find(i=>/^\d+\s*-\s*/.test(i.text)).text;
+            for (const row of rows) {
+                const m = row.text.match(/Turma:\s*(.+?)\s+Sala:/i);
+                if (m) nomePdf = m[1].trim();
+                const t = row.text.match(/Turno:\s*(.+)$/i);
+                if (t) turnoPdf = t[1].trim();
+                const total = norm(row.text).match(/QTDE TOTAL DE ALUNOS:\s*(\d+)/);
+                if (total) totais.push(Number(total[1]));
+            }
+            const header = rows.find(r => norm(r.text).includes('ALUNO PAED?') && norm(r.text).includes('NOME'));
+            if (!header) throw Error('Cabeçalho das colunas não reconhecido.');
+            const column = pattern => {
+                const item = header.items.find(i=>pattern.test(norm(i.text)));
+                if (!item) throw Error('Colunas do PDF diferentes do modelo.');
+                return item.x;
+            };
+            const xCod = column(/^COD\./), xNome = column(/^NOME$/), xData = column(/^DATA/), xPaed = column(/^ALUNO PAED/), xTipo = column(/^TIPO/);
+            const cell = (row, start, end) => row.items.filter(i=>i.x>=start-2 && i.x<end-2).map(i=>i.text).join(' ').trim();
+            let anterior = null;
+            for (const row of rows.filter(r=>r.y<header.y-3)) {
+                if (/QTDE TOTAL|TOTAL DE ALUNO/.test(norm(row.text))) break;
+                const seq = cell(row, 0, xCod), codigo = cell(row,xCod,xNome);
+                if (/^\d+$/.test(seq)) {
+                    if (!/^\d+$/.test(codigo)) throw Error('Código de aluno não reconhecido na sequência ' + seq + '.');
+                    const nome = cell(row,xNome,xData), flag = norm(cell(row,xPaed,xTipo));
+                    if (!nome) throw Error('Nome ausente na sequência ' + seq + '.');
+                    anterior = {seq:Number(seq),codigo,nome,paed:flag==='SIM'?'SIM':flag==='NAO'?'NÃO':'NÃO IDENTIFICADO'};
+                    alunos.push(anterior);
+                } else if (anterior && !seq && !codigo) {
+                    const continuation = cell(row,xNome,xData);
+                    if (continuation && !/QTDE|TOTAL/i.test(continuation)) anterior.nome += ' ' + continuation;
+                }
+            }
+        }
+        if (!nomePdf || norm(nomePdf) !== norm(turma.nome)) throw Error('A turma no PDF não corresponde à turma solicitada.');
+        if (turma.turno && turma.turno !== 'NÃO INFORMADO' && norm(turnoPdf) !== norm(turma.turno)) throw Error('O turno no PDF não corresponde à turma solicitada.');
+        const schoolCode = turma.url.split('?')[1].split(',')[1];
+        if (!escola.startsWith(schoolCode + ' ')) throw Error('A escola no PDF não corresponde à escola consultada.');
+        if (!totais.length) throw Error('Total do rodapé não encontrado; contagem não confirmada.');
+        const totalPdf = totais.at(-1);
+        if (totalPdf !== alunos.length) throw Error(`Conferência divergente: PDF informa ${totalPdf}, mas foram lidos ${alunos.length} alunos.`);
+        const codigos = new Set(alunos.map(a=>a.codigo));
+        if (codigos.size !== alunos.length) throw Error('O PDF contém códigos de alunos repetidos; confira a turma.');
+        if (alunos.some((a,i)=>a.seq!==i+1)) throw Error('Sequência de alunos incompleta ou repetida no PDF.');
+        const paed = alunos.filter(a=>a.paed==='SIM').length;
+        const naoPaed = alunos.filter(a=>a.paed==='NÃO').length;
+        const indefinidos = alunos.length-paed-naoPaed;
+        if (indefinidos) avisos.push(`${indefinidos} aluno(s) com PAED não identificado. Confira o PDF.`);
+        return {escola,alunos,total:alunos.length,paed,naoPaed,indefinidos,avisos};
+    }
+
+    let root, turmas=[], resultados=[], busy=false, cancelado=false, anoConsulta='', geradoEm='';
+    const $ = s => root.querySelector(s);
+    const status = text => { $('#status').textContent=text; };
+    const grid = () => document.getElementById('GridfreestyleContainerTbl');
+    function ajax() {
+        const el=document.getElementById('gx_ajax_notification');
+        if (!el) return false;
+        const s=getComputedStyle(el); return s.display!=='none' && s.visibility!=='hidden' && s.opacity!=='0';
+    }
+    async function aguardarAcao(action, precisaGrade=true) {
+        let mudou=false, last=Date.now(), viuAjax=false;
+        const obs=new MutationObserver(records=>{
+            if (records.some(r=>!(r.target===document.getElementById('previsao-host') || document.getElementById('previsao-host')?.contains(r.target)))) { mudou=true;last=Date.now(); }
+        });
+        obs.observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true});
+        const start=Date.now();
+        try {
+            action();
+            while (Date.now()-start<45000) {
+                if(cancelado) throw Error('Consulta interrompida.');
+                const active=ajax(); viuAjax ||= active;
+                if (!active && (mudou || viuAjax) && Date.now()-last>900 && Date.now()-start>1500 && (!precisaGrade||grid())) return;
+                await sleep(100);
+            }
+            throw Error('Não foi possível confirmar a atualização da grade. Consulte novamente no GED.');
+        } finally { obs.disconnect(); }
+    }
+    function mudarCampo(el,value) {
+        if (!el) throw Error('Filtro do GED não encontrado.');
+        el.value=value;
+        if(el.value!==value) throw Error('O ano ou turno solicitado não está disponível no GED.');
+        for(const type of ['input','change','blur']) el.dispatchEvent(new Event(type,{bubbles:true}));
+    }
+    async function aguardarFiltros() {
+        const start=Date.now();
+        await sleep(1200);
+        while(ajax()) {
+            if(cancelado) throw Error('Consulta interrompida.');
+            if(Date.now()-start>45000) throw Error('O GED não terminou de atualizar os filtros.');
+            await sleep(150);
+        }
+    }
+    function coletarGrade(ano) {
+        const list=[];
+        if(!grid()) throw Error('Grade de turmas não encontrada.');
+        for(const span of grid().querySelectorAll('[id^="span_vGERTURSAL_"]')) {
+            const row=span.closest('tr');
+            const native=row.innerHTML.match(/arrprevisaoalunosturma\.aspx\?[^"'\s<>]+/i);
+            const fallback=row.innerHTML.match(/arralunossituacao\.aspx\?[^"'\s<>]+/i);
+            if(!native&&!fallback) throw Error('Uma turma da grade não possui link de relatório reconhecido.');
+            const nome=span.textContent.trim();
+            const turno=norm(row.textContent).match(/MATUTINO|VESPERTINO|NOTURNO|INTEGRAL/)?.[0] || 'NÃO INFORMADO';
+            list.push({nome,turno,url:urlPrevisao((native||fallback)[0],ano,location.origin)});
+        }
+        return list;
+    }
+    function proximaPagina() {
+        return [...document.querySelectorAll('input,button,a,img')].find(el=>{
+            const tag=[el.id,el.getAttribute('name'),el.getAttribute('title'),el.getAttribute('alt'),el.getAttribute('aria-label'),el.tagName==='A'?el.textContent:''].join(' ');
+            return /PAGINGNEXT|PROXIMA PAGINA|PROXIMO|NEXT PAGE/i.test(norm(tag)) && !el.disabled && el.getAttribute('aria-disabled')!=='true' && !/disabled/i.test(el.className||'');
+        });
+    }
+    function setBusy(value) {
+        busy=value; isRodando=value;
+        for(const el of document.querySelectorAll('#ano-previsao-lote,#btn-mapear,#btn-iniciar-lote,#acao-lote,#chk-todas-turmas,.chk-turma-item,#btn-retomar-checkpoint,#btn-exportar-links-lote')) el.disabled=value;
+        if(!value) resetarBotaoLote();
+        $('#parar').disabled=!value;
+    }
+    async function buscar() {
+        if(busy) return;
+        cancelado=false;setBusy(true);turmas=[];resultados=[];render();turmasMapeadas=[];renderizarTurmasMapeadas();
+        try {
+            const ano=document.getElementById('ano-previsao-lote').value.trim();
+            if(!/^20\d{2}$/.test(ano)) throw Error('Informe um ano válido.');
+            status(`Consultando turmas de ${ano}, em todos os turnos...`);
+            const year=document.getElementById('vGERANOLETCOD');
+            if(!year) throw Error('Não encontrei o filtro de ano vGERANOLETCOD nesta tela.');
+            if(year.value!==ano) {
+                mudarCampo(year,ano); await aguardarFiltros();
+            }
+            mudarCampo(document.getElementById('vGRHTRNCOD'),'0'); await aguardarFiltros();
+            const btn=document.querySelector('input[name="BCONSULTAR"],#BCONSULTAR,.btnConsultar');
+            if(!btn) throw Error('Botão Consultar não encontrado.');
+            await aguardarAcao(()=>btn.click());
+            const encontrados=new Map(), paginas=new Set();
+            for(let page=0;page<200;page++) {
+                if(cancelado) throw Error('Consulta interrompida.');
+                const batch=coletarGrade(ano);
+                const assinatura=batch.map(t=>t.url).join('|');
+                if(paginas.has(assinatura)) throw Error('A paginação não avançou. Verifique os controles de página do GED.');
+                paginas.add(assinatura);batch.forEach(t=>encontrados.set(t.url,t));
+                const next=proximaPagina();
+                if(!next) break;
+                if(page===199) throw Error('Limite de páginas atingido. Refine a consulta.');
+                status(`Lendo página ${page+2} das turmas de ${ano}...`);
+                await aguardarAcao(()=>next.click());
+            }
+            if(!encontrados.size) throw Error('Nenhuma turma encontrada para esse ano e os filtros atuais.');
+            turmas=[...encontrados.values()].sort((a,b)=>a.turno.localeCompare(b.turno)||a.nome.localeCompare(b.nome,'pt-BR',{numeric:true}));
+            anoConsulta=ano;
+            turmasMapeadas=turmas;
+            renderizarTurmasMapeadas(turmas.length+' turmas de '+ano+' encontradas.');
+            status(`${turmas.length} turmas de ${ano} encontradas. Selecione as turmas e gere o relatório.`);
+        } catch(e) {status(e.message);} finally {setBusy(false);}
+    }
+    function baixarPdf(url) {
+        return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url,responseType:'arraybuffer',timeout:45000,
+            onload:r=>{
+                const data=new Uint8Array(r.response||[]);
+                if(r.status!==200) return reject(Error(`Falha HTTP ${r.status} ao consultar o relatório.`));
+                if(!new TextDecoder().decode(data.slice(0,1024)).includes('%PDF-')) return reject(Error('O GED não devolveu um PDF. Confira se a sessão continua aberta.'));
+                resolve(data);
+            },onerror:()=>reject(Error('Falha de conexão com o GED.')),ontimeout:()=>reject(Error('O GED demorou demais para responder.'))
+        }));
+    }
+    async function gerar() {
+        if(busy) return;
+        const selecionadas=obterTurmasSelecionadasNoPainel();
+        if(!selecionadas.length) return status('Busque e selecione ao menos uma turma.');
+        if(document.getElementById('ano-previsao-lote').value!==anoConsulta) return status('O ano foi alterado. Busque as turmas novamente.');
+        cancelado=false;setBusy(true);geradoEm=new Date().toLocaleString('pt-BR');
+        resultados=selecionadas.map(t=>({...t,situacao:'Pendente'}));render();
+        try {
+            if(typeof pdfjsLib==='undefined') throw Error('Biblioteca de leitura de PDF não carregada. Recarregue a página.');
+            pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+            for(let i=0;i<resultados.length;i++) {
+                if(cancelado) break;
+                const r=resultados[i];r.situacao='Lendo';render();status(`Lendo ${i+1}/${resultados.length}: ${r.nome} (${r.turno})...`);
+                try {
+                    const data=await baixarPdf(r.url);
+                    const pdf=await pdfjsLib.getDocument({data}).promise;
+                    try {
+                        const pages=[];
+                        for(let p=1;p<=pdf.numPages;p++) pages.push((await (await pdf.getPage(p)).getTextContent()).items);
+                        Object.assign(r,analisarPdf(pages,r));r.situacao=r.indefinidos?'Conferir PAED':'Conferido';
+                    } finally {await pdf.destroy();}
+                } catch(e) {r.situacao='Falha';r.erro=e.message;}
+                render();if(i<resultados.length-1&&!cancelado) await sleep(800);
+            }
+            status(cancelado?'Interrompido. O resumo parcial mantém as turmas pendentes.':'Leitura concluída. Confira as situações de cada turma abaixo.');
+        } catch(e) {status(e.message);} finally {setBusy(false);render();}
+    }
+    function resumoHtml() {
+        const ok=resultados.filter(r=>Number.isInteger(r.total));
+        const sum=field=>ok.reduce((n,r)=>n+r[field],0);
+        const completo=ok.length===resultados.length && ok.every(r=>!r.indefinidos);
+        return `<h2>Previsão de alunos por turma — ${esc(anoConsulta)}</h2>
+            <p>${esc([...new Set(ok.map(r=>r.escola))].join(' • '))}</p>
+            <p>${completo?'Relatório conferido':'RELATÓRIO PARCIAL / COM PENDÊNCIAS'} · ${ok.length}/${resultados.length} turmas lidas · ${esc(geradoEm)}</p>
+            <p><strong>${sum('total')} alunos · ${sum('paed')} PAED · ${sum('naoPaed')} não PAED · ${sum('indefinidos')} não identificados</strong></p>
+            <p>Totais somados por turma; um aluno previsto em mais de uma turma conta em cada uma. Inclui todos os alunos do PDF, independentemente da matrícula efetivada.</p>
+            <table><thead><tr><th>Turma</th><th>Turno</th><th>Total</th><th>PAED</th><th>Não PAED</th><th>Não identificado</th><th>Situação</th></tr></thead><tbody>
+            ${resultados.map(r=>`<tr><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.nome)}</a></td><td>${esc(r.turno)}</td><td>${r.total??'—'}</td><td>${r.paed??'—'}</td><td>${r.naoPaed??'—'}</td><td>${r.indefinidos??'—'}</td><td>${esc(r.situacao)}${r.erro?'<br>'+esc(r.erro):''}${r.avisos?.length?'<br>'+esc(r.avisos.join(' ')):''}</td></tr>`).join('')}
+            </tbody><tfoot><tr><th colspan="2">${completo?'Total':'Subtotal lido'}</th><th>${sum('total')}</th><th>${sum('paed')}</th><th>${sum('naoPaed')}</th><th>${sum('indefinidos')}</th><th>${ok.length}/${resultados.length} turmas</th></tr></tfoot></table>`;
+    }
+    function render() {
+        $('#resumo').innerHTML=resultados.length?resumoHtml():'';
+        $('#detalhes').innerHTML=resultados.filter(r=>r.alunos).map(r=>`<details><summary>${esc(r.nome)} · ${esc(r.turno)} — ${r.total} alunos (${r.paed} PAED)</summary><table><thead><tr><th>Código</th><th>Aluno</th><th>PAED</th></tr></thead><tbody>${r.alunos.map(a=>`<tr><td>${esc(a.codigo)}</td><td>${esc(a.nome)}</td><td>${esc(a.paed)}</td></tr>`).join('')}</tbody></table></details>`).join('');
+        for(const id of ['csv','csv-alunos','imprimir']) $('#'+id).disabled=busy||!resultados.length;
+    }
+    function csv(detalhado) {
+        const rows=detalhado?[['Ano','Turma','Turno','Código','Aluno','PAED']]:[['Ano','Turma','Turno','Total','PAED','Não PAED','Não identificado','Situação','Observação']];
+        for(const r of resultados) {
+            if(detalhado) for(const a of r.alunos||[]) rows.push([anoConsulta,r.nome,r.turno,a.codigo,a.nome,a.paed]);
+            else rows.push([anoConsulta,r.nome,r.turno,r.total??'',r.paed??'',r.naoPaed??'',r.indefinidos??'',r.situacao,r.erro||r.avisos?.join(' ')||'']);
+        }
+        const safe=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,"'    iniciarModuloAcoesLote();").replace(/"/g,'""')+'"';
+        const blob=new Blob(['\uFEFF'+rows.map(r=>r.map(safe).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+        const url=URL.createObjectURL(blob),a=document.createElement('a');
+        a.href=url;a.download=`previsao-${anoConsulta}-${detalhado?'alunos-lidos':'resumo'}${resultados.some(r=>!r.alunos||r.indefinidos)?'-parcial':''}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
+    }
+    const css=`:host{font:14px Arial,sans-serif;color:#203047}*{box-sizing:border-box}section{padding:24px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;margin:18px auto;max-width:1300px}h1{margin:0;font-size:24px}h2{font-size:20px}p{line-height:1.5}button,input{font:inherit}button{padding:10px 14px;border:1px solid #b8c6d8;border-radius:6px;background:#f4f7fb;color:#203047;cursor:pointer}button.primary{background:#175b9e;color:white}button:disabled{opacity:.5;cursor:default}.acoes{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:15px 0}input[type=number]{width:95px;padding:8px}#lista{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;max-height:270px;overflow:auto;margin:12px 0}#lista label{padding:8px;background:#f3f6fa;border-radius:5px}small{display:block;margin-left:22px;color:#52657e}#status{padding:12px;background:#edf4fc;border-radius:6px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:10px;border:1px solid #d5deea;text-align:left}th{background:#edf2f8}td{vertical-align:top}a{color:#175b9e}details{margin:10px 0}summary{padding:12px;cursor:pointer;background:#f1f5f9}.scroll{overflow:auto}@media print{body{font:11px Arial}button{display:none}h2{font-size:18px}thead{display:table-header-group}tr{break-inside:avoid}a{color:inherit;text-decoration:none}th,td{padding:7px}}`;
+    function iniciar() {
+        let host=document.getElementById('previsao-host');
+        if(host) return host;
+        host=document.createElement('div');host.id='previsao-host';root=host.attachShadow({mode:'open'});
+        root.innerHTML=`<style>${css}section{padding:12px;margin:12px 0}h2{font-size:17px}</style><section><p id="status" role="status" aria-live="polite">Atualize as turmas de 2027 e clique em Gerar previsão.</p><div class="acoes"><button id="parar" disabled>Parar após a consulta atual</button><button id="csv" disabled>Baixar resumo CSV</button><button id="csv-alunos" disabled>Baixar alunos CSV</button><button id="imprimir" disabled>Imprimir / salvar PDF</button></div><div id="resumo" class="scroll"></div><div id="detalhes" class="scroll"></div></section>`;
+        document.getElementById('log-lote').insertAdjacentElement('afterend',host);
+        for(const button of root.querySelectorAll('button')) button.type='button';
+        $('#parar').onclick=()=>{cancelado=true;status('Parada solicitada. Aguardando a consulta atual terminar...');};
+        $('#csv').onclick=()=>csv(false);$('#csv-alunos').onclick=()=>csv(true);
+        $('#imprimir').onclick=()=>{
+            const w=window.open('','_blank');if(!w) return status('Permita a janela de impressão no navegador.');
+            w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Previsão de alunos ${esc(anoConsulta)}</title><style>${css}</style></head><body><button onclick="window.print()">Imprimir / salvar PDF</button>${resumoHtml()}</body></html>`);w.document.close();
+        };
+        render();return host;
+    }
+    let ativo=false;
+    function ativar(value) {
+        if(value!==ativo) {
+            turmasMapeadas=[];turmas=[];anoConsulta='';
+            renderizarTurmasMapeadas(value?'Atualize as turmas do ano da previsão.':'Atualize as turmas para a ação selecionada.');
+            document.getElementById('status-mapeamento').textContent=value?'Atualize as turmas do ano da previsão.':'Atualize as turmas para a ação selecionada.';
+        }
+        ativo=value;
+        document.getElementById('opcoes-previsao-lote').hidden=!value;
+        const host=value?iniciar():document.getElementById('previsao-host');if(host)host.hidden=!value;
+        document.getElementById('btn-mapear').textContent=value?'1. Buscar turmas para previsão':'1. Atualizar Turmas';
+        document.getElementById('btn-abrir-planilha-lote').hidden=value;
+        document.getElementById('btn-abrir-planilha-lote').style.display=value?'none':'block';
+        document.getElementById('chk-retomada-automatica').closest('label').hidden=value;
+        if(value) document.getElementById('checkpoint-lote-box').style.display='none';
+        else atualizarPainelCheckpoint();
+    }
+    return {buscar,gerar,ativar};
+
+    })();
 
     iniciarModuloAcoesLote();
 })();
