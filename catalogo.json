@@ -2,6 +2,14 @@
   "formato": 1,
   "ferramentas": [
     {
+      "id": "arquivo-digital-gpe",
+      "titulo": "Arquivo Digital - GPE",
+      "descricao": "Consulta de servidores no SIGEDUCA e área reservada para documentos internos.",
+      "arquivo": "gpe/arquivo-digital-servidores.user.js",
+      "registros": ["arquivo-digital-gpe"],
+      "modulos": ["grh"]
+    },
+    {
       "id": "termos-compromisso",
       "titulo": "Termos de Compromisso",
       "descricao": "Termos escolares, imagem com seleção por idade e compromisso de entrega de documentos pendentes.",
@@ -99,7 +107,7 @@
     },
     {
       "id": "arquivo-digital-aluno",
-      "titulo": "Arquivo Digital",
+      "titulo": "Arquivo Digital - GED",
       "descricao": "Consulta, cadastro de pastas e organização de documentos em uma única tela.",
       "arquivo": "ged/arquivo-digital-aluno.user.js",
       "registros": [

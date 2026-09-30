@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         SIGEDUCA - Ferramentas - Arquivo Digital do Aluno
+// @name         Arquivo Digital - GED
 // @namespace    http://tampermonkey.net/
-// @version      0.16.0
+// @version      0.17.0
 // @description  Arquivo Digital com consulta e inclusão de pastas, documentos, OCR local e Google Drive.
 // @author       Elder Martins / adaptação assistida
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
@@ -27,7 +27,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.16.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '0.17.0',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js'
     });
@@ -49,13 +49,13 @@
     const FERRAMENTAS = Object.freeze([
         {
             id: 'arquivo-digital',
-            titulo: 'Arquivo Digital',
+            titulo: 'Arquivo Digital - GED',
             url: 'hwmconaluno.aspx#arquivo-digital',
             descricao: 'Consultar pastas, cadastrar e organizar documentos',
             ordem: 30,
             grupo: 'Secretaria',
             grupoOrdem: 10,
-            versao: '0.16.0'
+            versao: '0.17.0'
         }
     ]);
 
@@ -78,7 +78,7 @@
 
     const APP = {
         id: 'adig03',
-        version: '0.16.0',
+        version: '0.17.0',
         hashes: Object.freeze({
             consulta: '#arquivo-digital-consulta',
             upload: '#arquivo-digital-upload'
@@ -3644,7 +3644,7 @@
     function compactUploadInterface(bar,result) {
         el.resultsPanel=result;result.hidden=!state.generatedDocuments.length;
         const app=el.app;
-        app.querySelector('.ad-title').textContent='Arquivo Digital';
+        app.querySelector('.ad-title').textContent='Arquivo Digital - GED';
         app.querySelector('.ad-subtitle').textContent=`Organização e envio de documentos · v${APP.version}`;
         el.scannerBtn.hidden=true;
         const left=app.querySelector('.ad-left');
@@ -4032,7 +4032,7 @@
         const app=el.app;
         app.classList.add('unified');
         app.querySelector('.ad-subtitle').textContent='Gestão de pastas e documentos';
-        const tabs=[['consulta','Consultar Pasta'],['incluir','Incluir Pasta'],['internos','Documentos Internos'],['config','Configurações'],['ajuda','Ajuda']];
+        const tabs=[['consulta','Consultar Pasta'],['incluir','Incluir Pasta'],['config','Configurações'],['ajuda','Ajuda']];
         const nav=document.createElement('nav');nav.className='workspace-tabs';nav.setAttribute('role','tablist');nav.setAttribute('aria-label','Arquivo Digital');
         const body=document.createElement('div');body.className='workspace-body';
         const sidebar=app.querySelector('.ad-left');
@@ -4058,7 +4058,7 @@
         const summary=el.summary.closest('.section');inclusion.append(summary);
         const help=sidebar.querySelector('details.section');
         const connection=el.driveStatus.closest('.section');
-        map.config.panel.innerHTML='<div class="panel-heading"><div><h2>Configurações</h2><p>Conexão com o Google Drive e atualização das listas.</p></div></div><div class="settings-connection"></div><div class="settings-index"><h3>Listas e pesquisa</h3><p>A lista salva neste computador é reutilizada. As atualizações são verificadas em segundo plano.</p></div><div class="future-collections"><h3>Acervos</h3><p><b>Alunos</b> · disponível</p><p><b>Servidores contratados e efetivos</b> · em preparação</p><p>O acesso aos servidores será habilitado após a criação das planilhas e da proteção de acesso.</p></div>';
+        map.config.panel.innerHTML='<div class="panel-heading"><div><h2>Configurações</h2><p>Conexão com o Google Drive e atualização das listas.</p></div></div><div class="settings-connection"></div><div class="settings-index"><h3>Listas e pesquisa</h3><p>A lista salva neste computador é reutilizada. As atualizações são verificadas em segundo plano.</p></div>';
         map.config.panel.querySelector('.settings-connection').append(connection,el.driveConfigBtn);
         el.driveConfigBtn.textContent='Configurar conexão';
         const options=app.querySelector('.search-options');options.open=true;map.config.panel.querySelector('.settings-index').append(options);
@@ -4090,9 +4090,7 @@
         applySearchMode();
         map.ajuda.panel.innerHTML='<div class="panel-heading"><div><h2>Ajuda</h2><p>Da localização da pasta ao envio dos documentos.</p></div></div><ol class="help-steps"><li><b>Localize a pasta.</b> Escolha o arquivo e pesquise pelo nome. Use a data de nascimento para distinguir nomes iguais.</li><li><b>Consulte ou inclua.</b> Em Consultar Pasta, carregue os documentos existentes. Em Incluir Pasta, cadastre quem ainda não consta na lista e escolha a caixa física.</li><li><b>Revise e salve.</b> Adicione PDFs ou fotos, use o OCR e confira a classificação. Quando uma folha tiver dois documentos, duplique a página e classifique cada cópia.</li></ol><p>A troca de abas mantém a seleção e as páginas carregadas. Use Rascunho para guardar um trabalho antes de fechar a página.</p>';
         if(help){help.open=true;help.querySelector('summary').textContent='Identificação de documentos';map.ajuda.panel.append(help);}
-        map.internos.panel.innerHTML='<div class="reserved-area"><span class="area-tag">EM PREPARAÇÃO</span><h2>Documentos Internos</h2><p>Um espaço para os documentos administrativos da escola.</p><p>Esta área será habilitada com a configuração do acervo e do acesso restrito.</p></div>';
-        const collection=document.createElement('div');collection.innerHTML=`<label for="${APP.id}-collection">Acervo</label><select id="${APP.id}-collection"><option>Alunos</option><option disabled>Servidores contratados · em breve</option><option disabled>Servidores efetivos · em breve</option></select>`;
-        el.workspaceIdentity.prepend(collection);
+
         el.searchStudentBtn.textContent='Pesquisar';
         sidebar.querySelector('.section-title').textContent='Localização da pasta';
         el.uploadFolderBox.classList.add('legacy-folder-box');
@@ -4220,7 +4218,7 @@
 
         injectStyles();
 
-        document.title = 'Arquivo Digital';
+        document.title = 'Arquivo Digital - GED';
         buildUnifiedInterface();
         addLog(`Arquivo Digital v${APP.version} inicializado.`, 'success');
 

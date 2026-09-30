@@ -6,7 +6,7 @@ Userscripts de Elder Martins para uso com o Tampermonkey.
 ## Organização por módulo
 
 - [GED — Gestão Escolar](ged/): ferramentas usadas em `/ged`, menu azul.
-- [GPE — Gestão de Pessoas](gpe/): pasta para as futuras ferramentas usadas em `/grh`, menu vermelho.
+- [GPE — Gestão de Pessoas](gpe/): Arquivo Digital de servidores e documentos internos em `/grh`, menu vermelho.
 - [GPO](gpo/): exportador de notas fiscais, menu marrom.
 
 O menu base e o catálogo ficam na raiz. As ferramentas ficam exclusivamente nas pastas de seus módulos. Os endereços antigos da raiz foram removidos. Quem instalou antes da reorganização deve atualizar o menu para 2.8.2 e reinstalar as ferramentas pela central uma vez para receber os novos endereços de atualização.
@@ -26,6 +26,7 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 
 | Ferramenta | Instalação | Onde aparece |
 | --- | --- | --- |
+| Arquivo Digital - GPE | [Instalar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/arquivo-digital-servidores.user.js) | GPE — cadastro de servidores |
 | Menu Lateral de Ferramentas (Base) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js) | Menu Ferramentas |
 | Termos de Compromisso | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/termos-compromisso.user.js) | Menu Ferramentas |
 | Requerimentos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/requerimentos.user.js) | Menu Ferramentas |
@@ -35,16 +36,16 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Ações em Lote (Turmas) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js) | Menu Ferramentas |
 | Consulta Alunos em Lote | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-alunos-lote.user.js) | Menu Ferramentas |
 | Extrair Dados Pessoais | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrair-dados-pessoais.user.js) | Menu Ferramentas |
-| Arquivo Digital | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js) | Menu Ferramentas |
+| Arquivo Digital - GED | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js) | Menu Ferramentas |
 | Relação de Alunos e Planilha Online - Por Turma (Com Atestados) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/relacao-alunos-planilha.user.js) | Tela específica |
 | Extrator de Matrícula Certidão | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrator-certidao.user.js) | Tela específica |
 | Exportar notas fiscais para CSV | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpo/notas-fiscais-csv.user.js) | Tela específica |
 
-O Arquivo Digital tem uma única entrada no menu e cinco abas: Consultar Pasta, Incluir Pasta, Documentos Internos, Configurações e Ajuda. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
+O **Arquivo Digital - GED** atende somente alunos, com as abas Consultar Pasta, Incluir Pasta, Configurações e Ajuda. O **Arquivo Digital - GPE** é um script separado, com consulta de servidores e a área de documentos internos em `/grh/hwmgrhservidor.aspx`. Atualize o menu para 2.8.4 para o novo acabamento do GPE. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
 
 ## Termos de Compromisso
 
-Consulte também as [novidades e orientações do Arquivo Digital 0.16.0](ged/arquivo-digital.md): cadastro em caixas, seleção obrigatória antes do envio, duplicação de páginas, lista única e identificação local de documentos.
+Consulte também as [novidades e orientações do Arquivo Digital - GED 0.17.0](ged/arquivo-digital.md): cadastro em caixas, seleção obrigatória antes do envio, duplicação de páginas, lista única e identificação local de documentos.
 
 Disponível em **Ferramentas → Adicionar ferramentas → Termos de Compromisso**. Usa a mesma página-base de Requerimentos, preservando o campo de código e a lupa nativa do aluno, com uma página separada para emissão de termos.
 
@@ -109,7 +110,7 @@ A automação de turmas em sigeduca-automatico é um projeto separado e não faz
 
 ## GED e Gestão de Pessoas
 
-O menu 2.8.0 identifica o módulo pelo endereço: `/ged` exibe GED em azul; `/grh` exibe GPE em vermelho. O catálogo e os links registrados são filtrados pelo módulo atual. Ainda não há ferramentas GPE publicadas.
+O menu 2.8.0 identifica o módulo pelo endereço: `/ged` exibe GED em azul; `/grh` exibe GPE em vermelho. O catálogo e os links registrados são filtrados pelo módulo atual. O Arquivo Digital - GPE já está disponível na central do módulo.
 
 Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu também identifica `/gpo` e usa marrom nessa área. Categorias serão definidas posteriormente.
 

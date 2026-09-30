@@ -256,7 +256,7 @@ test('consulta atrasada não mostra documentos nem altera a pasta de outra pesso
 });
 
 test('trocar abas preserva páginas e seleção e mantém um único painel ativo',()=>{
- const t=fixture();t.el.workspaceTabs=Object.fromEntries(['consulta','incluir','internos','config','ajuda'].map(k=>[k,{button:{setAttribute(){}},panel:{}}]));t.el.workspaceIdentity={};t.el.workspaceSidebar={};
+ const t=fixture();t.el.workspaceTabs=Object.fromEntries(['consulta','incluir','config','ajuda'].map(k=>[k,{button:{setAttribute(){}},panel:{}}]));t.el.workspaceIdentity={};t.el.workspaceSidebar={};
  const pages=[{id:'page',docKey:'ged_certidao'}],person={name:'ANA'};t.state.pageModels=pages;t.state.selectedStudentMatch=person;t.state.workspacePreloaded=true;
  for(const key of Object.keys(t.el.workspaceTabs)){assert.equal(t.selectWorkspaceTab(key),true);assert.equal(Object.values(t.el.workspaceTabs).filter(x=>!x.panel.hidden).length,1);assert.equal(t.state.pageModels,pages);assert.equal(t.state.selectedStudentMatch,person);}
  t.state.processing=true;assert.equal(t.selectWorkspaceTab('consulta'),false);assert.equal(t.state.workspaceTab,'ajuda');

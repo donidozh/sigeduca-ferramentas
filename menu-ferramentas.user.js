@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Menu Lateral de Ferramentas (Base)
 // @namespace    http://tampermonkey.net/
-// @version      2.8.3
+// @version      2.8.4
 // @description  Menu lateral independente para centralizar os userscripts instalados no SIGEDUCA.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/ged/
@@ -26,7 +26,7 @@
 
     // A versão vem do cabeçalho instalado no Tampermonkey.
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.3',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.8.4',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js'
     });
@@ -872,6 +872,7 @@
 
         const style = document.createElement('style');
         style.textContent = `
+            ${MODULO_ATUAL.id === 'grh' ? `.sig-shell{font-family:Arial,sans-serif!important}.sig-painel{background:#f5f6f8!important;border-color:#e6d9dc!important}.sig-cabecalho{background:#fff!important;color:#342126!important}.sig-fechar{color:#9e242b!important;background:#faecee!important}.sig-subtitulo{color:#80676b!important}.sig-item,.sig-catalogo-card{border-radius:12px!important}.sig-rodape{border-color:#e6d9dc!important;color:#80676b!important}` : ''}
             .sig-catalogo-card { margin: 10px 0; padding: 12px; border: 1px solid ${corDoModulo("#d8e0eb")}; border-radius: 10px; background: #fff; color: ${corDoModulo("#203047")}; font-size: 13px; }
             .sig-catalogo-ajuda { margin: 8px 0; font-size: 12px; line-height: 1.5; color: ${corDoModulo("#526178")}; }
             .sig-catalogo-instalar { border: 0; border-radius: 7px; background: ${corDoModulo("#1958b7")}; color: white; padding: 8px 12px; font: inherit; cursor: pointer; }

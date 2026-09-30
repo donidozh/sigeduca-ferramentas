@@ -1,4 +1,4 @@
-# Arquivo Digital 0.16.0
+# Arquivo Digital - GED 0.17.0
 
 **Teste XLSX (padrão na 0.16.0):** ao abrir a página, o serviço exporta Permanente e Formandos pela API do Drive. O navegador lê as duas planilhas com XLSX e guarda os registros em cache, separado por conexão. A abertura aguarda as duas listas; as pesquisas seguintes são locais. Não há leitura aba por aba pelo Apps Script nem prazo de 15 minutos para essa cópia. Ao recarregar a página, as listas são baixadas novamente. A cópia anterior só é substituída depois da leitura válida, e falhas não liberam a abertura com dados antigos silenciosamente.
 
@@ -16,9 +16,9 @@ Em **Configurações → Modo de pesquisa**, é possível voltar a **Índices ne
 
 Este primeiro teste reaproveita o índice compartilhado do Apps Script, com validade de 15 minutos. A primeira consulta após perda/expiração desse cache ainda precisa preparar o índice no Google e pode demorar. Ainda não foi instalado um agendamento de pré-aquecimento; a comparação entre a primeira consulta e as seguintes orientará essa próxima decisão.
 
-Uma única entrada **Arquivo Digital** reúne as abas **Consultar Pasta**, **Incluir Pasta**, **Documentos Internos**, **Configurações** e **Ajuda**. Consulta e inclusão compartilham a busca e a pasta selecionada. Alternar abas mantém as páginas e classificações. Os atalhos antigos continuam compatíveis.
+A entrada **Arquivo Digital - GED** reúne as abas **Consultar Pasta**, **Incluir Pasta**, **Configurações** e **Ajuda**, exclusivamente para alunos. Consulta e inclusão compartilham a busca e a pasta selecionada. Alternar abas mantém as páginas e classificações. Os atalhos antigos continuam compatíveis.
 
-Servidores contratados, efetivos e documentos internos estão apenas sinalizados como áreas em preparação; seu acesso ainda depende das futuras planilhas e da proteção no serviço.
+Servidores e documentos internos foram transferidos para o script separado **Arquivo Digital - GPE**, em `gpe/arquivo-digital-servidores.user.js`. O seletor redundante de acervo e a aba Documentos Internos foram removidos do GED. O nome no Tampermonkey agora é Arquivo Digital - GED; se a instalação criar uma cópia, desative a antiga Arquivo Digital do Aluno e transfira as configurações pelo gerenciador.
 
 Em **Configurações → Listas e pesquisa → Reconstruir índice completo**, escolha Permanente ou Formandos. A reconstrução ignora o cache do serviço, relê todas as caixas e só substitui o índice local após concluir. Se falhar, o índice anterior é preservado. O andamento aparece na mesma seção. Isso não altera a pasta selecionada.
 
