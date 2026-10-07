@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - Consulta de Atestados em Lote
 // @namespace    sigeduca.consulta.atestados
-// @version      2.0.3
+// @version      2.0.4
 // @description  Painel de consulta por código do aluno, detalhes em segundo plano, paginação e relatórios HTML/PDF/CSV.
 // @match        *://sigeduca.seduc.mt.gov.br/ged/*
 // @require      https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js
@@ -19,7 +19,7 @@
     if (window.top !== window.self) return;
     const HASH_FERRAMENTA = '#consulta-atestados-lote';
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.0.3',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '2.0.4',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-atestados-lote.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-atestados-lote.user.js'
     });
@@ -364,6 +364,33 @@
         const el = $('TPROXIMO');
         return !!el?.querySelector('a') && el.style.display !== 'none';
     }
+    async function identifyEmptyStudent(item) {
+        item.state = 'SEM ATESTADOS';
+        item.note = 'Não possui atestados nesta consulta e ano letivo.';
+        // Mesma tela de leitura usada pelo módulo Extrair Dados Pessoais.
+        const url = new URL('hwtmgedaluno.aspx?' + item.code + ',,HWMConAluno,DSP,1,0', location.href);
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), 25000);
+        try {
+            const response = await fetch(url.href, {
+                method:'GET', credentials:'same-origin', cache:'no-store', signal:abort.signal
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const finalURL = new URL(response.url || url.href);
+            if (finalURL.origin !== location.origin ||
+                !/\/hwtmgedaluno\.aspx$/i.test(finalURL.pathname) ||
+                normCode(finalURL.search.slice(1).split(',')[0]) !== normCode(item.code)) {
+                throw new Error('Sessão expirada ou redirecionamento na identificação do aluno.');
+            }
+            const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+            const name = value(doc, 'CTLGERPESNOM');
+            if (!name) throw new Error('Nome do aluno não retornado pelo cadastro.');
+            item.name = name;
+        } catch (error) {
+            item.note += ' Nome não localizado: ' + (error.name === 'AbortError' ? 'tempo de consulta excedido.' : error.message);
+        } finally { clearTimeout(timer); }
+    }
+
     async function consult(item) {
         const field = $('vGEDALUCOD');
         const button = document.querySelector('input[name="BCONSULTAR"]');
@@ -375,8 +402,7 @@
         const result = await waitGrid(() => button.click());
         if (stop) return;
         if (result.empty) {
-            item.state = 'SEM ATESTADOS';
-            item.note = 'Nenhum atestado retornado para o código nesta consulta e ano letivo.';
+            await identifyEmptyStudent(item);
             return;
         }
         if (pageInfo().current !== 1) {
@@ -417,9 +443,10 @@
             if (stop) return;
             const info = pageInfo();
             if (info.current >= info.max && !nextAvailable()) {
-                item.state = item.records.length ? 'CONCLUÍDA' : 'SEM ATESTADOS';
-                item.note = item.records.length ? 'Todas as páginas e detalhes lidos.' :
-                    'Nenhum atestado retornado para o código nesta consulta e ano letivo.';
+                if (item.records.length) {
+                    item.state = 'CONCLUÍDA';
+                    item.note = 'Todas as páginas e detalhes lidos.';
+                } else { await identifyEmptyStudent(item); }
                 return;
             }
             const next = $('TPROXIMO')?.querySelector('a');
@@ -504,7 +531,10 @@
     function report() {
         return {
             emitted:now(), context:{...context},
-            queries:JSON.parse(JSON.stringify(queries)),
+            queries:JSON.parse(JSON.stringify([
+                ...queries.filter(x => x.state !== 'SEM ATESTADOS'),
+                ...queries.filter(x => x.state === 'SEM ATESTADOS')
+            ])),
             count:records().length,
             complete:queries.filter(x => x.state === 'CONCLUÍDA').length,
             empty:queries.filter(x => x.state === 'SEM ATESTADOS').length,
@@ -525,15 +555,16 @@
             'h3{font-size:15px;color:#123451;margin:0 0 10px}p{margin:7px 0}' +
             '.muted{color:#63768a;font-size:12px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0}' +
             '.stat{border:1px solid #dce7ee;border-radius:8px;padding:14px}.stat b{display:block;font-size:27px;color:#087e83}' +
-            '.stat span{font-size:12px}.student{margin:28px 0 0;break-before:auto}' +
+            '.stat span{font-size:12px}.student{margin:28px 0 0}.student-head h2{overflow-wrap:anywhere}' +
+            '.details-columns{column-count:2;column-gap:8mm;column-fill:balance}.field{margin-bottom:8px;break-inside:avoid}.empty-list{width:100%;border-collapse:collapse}.empty-list td,.empty-list th{text-align:left;padding:7px;border-bottom:1px solid #dce5ed}.empty-list tr{break-inside:avoid}' +
             '.student-head{padding:13px 16px;background:#edf4f8;border-left:4px solid #087e83;break-inside:avoid;break-after:avoid}' +
-            '.card{padding:18px;margin:12px 0;border:1px solid #dce5ed;border-radius:8px;break-inside:avoid}' +
-            'dl{display:grid;grid-template-columns:170px 1fr;gap:7px 15px;margin:0}' +
+            '.card{padding:12px;margin:0 0 12px;border:1px solid #dce5ed;border-radius:8px}.card h3{break-after:avoid}' +
+            'dl{margin:0}' +
             'dt{font-size:12px;font-weight:bold;color:#5c7184}dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}' +
             '.notice{background:#fff5e8;color:#84460e;padding:12px;border-radius:7px}.footer{margin-top:28px;border-top:1px solid #dce5ed;padding-top:14px}' +
             '@page{size:A4;margin:16mm}@media print{body{background:white;padding:0}main{padding:0;box-shadow:none;max-width:none}' +
-            'h1{font-size:24px}.stats{gap:8px}a{color:inherit}header{padding-top:12px}}' +
-            '@media(max-width:640px){body{padding:10px}main{padding:20px}.stats{grid-template-columns:1fr 1fr}dl{grid-template-columns:1fr}}' +
+            'h1{font-size:24px}.stats{gap:8px}a{color:inherit}header{padding-top:12px}.student{break-before:page}.student:first-of-type{break-before:auto}.empty-section{break-before:page}.details-columns{column-fill:balance}}' +
+            '@media screen and (max-width:640px){body{padding:10px}main{padding:20px}.stats{grid-template-columns:1fr 1fr}.details-columns{column-count:1}}' +
             '</style></head><body><main><header><div class="eyebrow">SIGEDUCA / RELATÓRIO DE CONSULTA</div>' +
             '<h1>Consulta de Atestados em Lote</h1><p>' + esc(school) + '</p>' +
             '<p class="muted">Data de emissão do relatório: <strong>' + esc(model.emitted) + '</strong></p></header>' +
@@ -541,13 +572,19 @@
                 [model.empty,'consultas sem atestados'],[model.pending,'consultas com pendência']].map(x =>
                 '<div class="stat"><b>' + x[0] + '</b><span>' + x[1] + '</span></div>').join('') + '</div>' +
             (model.pending ? '<p class="notice">Relatório parcial: confira as pendências indicadas em cada aluno e atestado.</p>' : '') +
-            model.queries.map(item => '<section class="student"><div class="student-head"><h2>' +
+            model.queries.filter(item => item.state !== 'SEM ATESTADOS').map(item => '<section class="student"><div class="student-head"><h2>' +
                 esc(item.name || 'Aluno ' + item.code) + '</h2><p class="muted">Código ' + esc(item.code) +
                 ' · ' + esc(item.state) + ' · Consulta em ' + esc(item.time) + '</p></div>' +
                 '<p class="muted">' + esc(item.note) + '</p>' +
-                item.records.map(r => '<article class="card"><h3>Atestado ' + esc(r.id) + '</h3><dl>' +
-                    recordFields(r).map(f => '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>').join('') +
-                    '</dl></article>').join('') + '</section>').join('') +
+                '<div class="details-columns">' + item.records.map(r => '<article class="card"><h3>Atestado ' + esc(r.id) + '</h3><dl>' +
+                    recordFields(r).map(f => '<div class="field"><dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd></div>').join('') +
+                    '</dl></article>').join('') + '</div></section>').join('') +
+            (model.empty ? '<section class="empty-section"><h2>Alunos sem atestados</h2>' +
+                '<table class="empty-list"><thead><tr><th>Código</th><th>Aluno</th><th>Observação</th></tr></thead><tbody>' +
+                model.queries.filter(item => item.state === 'SEM ATESTADOS').map(item =>
+                    '<tr><td>' + esc(item.code) + '</td><td>' + esc(item.name || 'Nome não localizado') +
+                    '</td><td>' + esc(item.note || 'Não possui atestados.') + '</td></tr>').join('') +
+                '</tbody></table></section>' : '') +
             '<div class="footer muted">Fonte: SIGEDUCA · ' + esc(model.context.source) +
             '<br>A data de emissão acima é a deste relatório. As datas de inclusão e alteração pertencem aos registros do sistema.' +
             '<br>Para imprimir esta versão HTML ou salvar como PDF pelo navegador, use Ctrl+P.</div></main></body></html>';
@@ -602,24 +639,69 @@
         });
         y += 31;
         if (model.pending) text('RELATÓRIO PARCIAL: há consultas com pendências. Confira os avisos abaixo.',10,true,[144,71,23]);
-        for (const item of model.queries) {
-            space(34);
-            doc.setFillColor(237,244,248); doc.rect(left,y-4,width,10,'F');
-            text(item.name || 'Aluno ' + item.code,12,true,[18,52,81]);
+        const gap = 8, columnWidth = (width - gap) / 2;
+        let column = 0, columnTop = 0, columnLimit = bottom, columnMaxY = 0, activeStudent = null, studentIndex = 0;
+        function studentHeading(item, continuation = false) {
+            text((item.name || 'Aluno ' + item.code) + (continuation ? ' (continuação)' : ''),12,true,[18,52,81]);
             text('Código ' + item.code + ' | ' + item.state + ' | Consulta: ' + item.time,8,false,[91,110,127]);
-            if (item.note) text(item.note,9);
-            for (const row of item.records) {
-                space(35); y += 3;
-                text('ATESTADO ' + row.id,11,true,[8,126,131]);
-                for (const field of recordFields(row)) {
-                    space(14);
-                    text(field[0].toUpperCase(),8,true,[91,110,127]);
-                    text(field[1],10);
-                }
-                y += 3; space(2);
-                doc.setDrawColor(220,230,237); doc.line(left,y,193,y); y += 7;
+        }
+        function nextColumn() {
+            if (column === 0) { columnMaxY = Math.max(columnMaxY, y); column = 1; y = columnTop; }
+            else {
+                newPage(); studentHeading(activeStudent, true);
+                column = 0; columnTop = y; columnLimit = bottom; columnMaxY = y;
             }
-            y += 5;
+        }
+        function columnText(content, size = 9, bold = false, color = [35,54,74]) {
+            const step = size * .3528 * 1.35;
+            doc.setFont('helvetica',bold ? 'bold' : 'normal'); doc.setFontSize(size);
+            const lines = doc.splitTextToSize(pdfText(content), columnWidth);
+            for (const line of lines) {
+                if (y + step > columnLimit) nextColumn();
+                doc.setFont('helvetica',bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...color);
+                doc.text(line, left + column * (columnWidth + gap), y + size * .3528);
+                y += step;
+            }
+            y += 1.5;
+        }
+        for (const item of model.queries.filter(item => item.state !== 'SEM ATESTADOS')) {
+            // O nome ocupa a largura da folha; somente os detalhes usam duas colunas.
+            if (studentIndex++ > 0) newPage();
+            activeStudent = item; studentHeading(item);
+            if (item.note) text(item.note,9);
+            column = 0; columnTop = y; columnMaxY = y;
+            function measuredHeight(content, size, bold) {
+                doc.setFont('helvetica',bold ? 'bold' : 'normal'); doc.setFontSize(size);
+                return doc.splitTextToSize(pdfText(content), columnWidth).length * size * .3528 * 1.35 + 1.5;
+            }
+            const totalHeight = item.records.reduce((sum, row) => sum + measuredHeight('ATESTADO ' + row.id,11,true) + 4 +
+                recordFields(row).reduce((height, field) => height + measuredHeight(field[0].toUpperCase(),8,true) + measuredHeight(field[1],9,false),0),0);
+            // Equilibra relatórios curtos entre as duas colunas; os longos usam toda a folha.
+            columnLimit = totalHeight < 2 * (bottom - columnTop) ? Math.min(bottom,columnTop + totalHeight / 2 + 12) : bottom;
+            for (const row of item.records) {
+                if (y + 18 > columnLimit) nextColumn();
+                columnText('ATESTADO ' + row.id,11,true,[8,126,131]);
+                for (const field of recordFields(row)) {
+                    if (y + 12 > columnLimit) nextColumn();
+                    columnText(field[0].toUpperCase(),8,true,[91,110,127]);
+                    columnText(field[1],9);
+                }
+                y += 4;
+            }
+            // Retoma a largura inteira abaixo da coluna mais comprida.
+            y = Math.max(y, columnMaxY) + 6;
+        }
+        const emptyStudents = model.queries.filter(item => item.state === 'SEM ATESTADOS');
+        if (emptyStudents.length) {
+            if (studentIndex > 0) newPage();
+            text('Alunos sem atestados',14,true,[18,52,81]);
+            for (const item of emptyStudents) {
+                // Lista compacta: vários alunos na mesma página, sem quebra individual.
+                space(18);
+                text((item.name || 'Nome não localizado') + ' | Código ' + item.code,10,true);
+                text(item.note || 'Não possui atestados.',9);
+                y += 2;
+            }
         }
         space(24);
         text('Fonte: SIGEDUCA. A data de emissão é a deste relatório; inclusão e alteração são datas dos registros.',8,false,[91,110,127]);
@@ -648,7 +730,7 @@
             'Tipo','Início','Fim','Dias letivos','Observações','Incluído em','Incluído por','Alterado em','Alterado por',
             'Certificado militar','Força','UF militar','Categoria militar','Situação detalhes','Erro detalhes'];
         const lines = [headers];
-        queries.forEach(item => (item.records.length ? item.records : [{}]).forEach(r => lines.push([
+        report().queries.forEach(item => (item.records.length ? item.records : [{}]).forEach(r => lines.push([
             item.code,item.name,item.state,item.time,item.note,r.id,r.type,r.start,r.end,r.days,r.observation,
             r.createdAt,r.createdBy,r.changedAt,r.changedBy,r.militaryNumber,r.militaryBranch,r.militaryState,
             r.militaryCategory,r.status,r.error
