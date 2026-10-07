@@ -36,6 +36,7 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Lançador de Históricos | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/lancador-historicos.user.js) | Menu Ferramentas |
 | Ações em Lote (Turmas) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/acoes-lote-turmas.user.js) | Menu Ferramentas |
 | Consulta Alunos em Lote | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-alunos-lote.user.js) | Menu Ferramentas |
+| Consulta de Atestados em Lote | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/consulta-atestados-lote.user.js) | Menu Ferramentas — GED |
 | Extrair Dados Pessoais | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/extrair-dados-pessoais.user.js) | Menu Ferramentas |
 | Arquivo Digital - GED | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/arquivo-digital-aluno.user.js) | Menu Ferramentas |
 | Relação de Alunos e Planilha Online - Por Turma (Com Atestados) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/ged/relacao-alunos-planilha.user.js) | Tela específica |
@@ -43,6 +44,12 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 | Exportar notas fiscais para CSV | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpo/notas-fiscais-csv.user.js) | Tela específica |
 
 O **Arquivo Digital - GED** atende somente alunos, com as abas Consultar Pasta, Incluir Pasta, Configurações e Ajuda. O **Arquivo Digital - GPE** é um script separado, com consulta de servidores e a área de documentos internos em `/grh/hwmgrhservidor.aspx`. Atualize o menu para 2.8.4 para o novo acabamento do GPE. Os scripts de tela específica recebem atualização automática pelo Tampermonkey; não se registram no menu lateral e não aparecem na verificação dele. O arquivo modelo-novo-modulo.js é um exemplo para desenvolvimento, não uma ferramenta para instalar.
+
+## Consulta de Atestados em Lote
+
+Disponível no GED em **Ferramentas → Adicionar ferramentas → Consulta de Atestados em Lote**. Instale no Tampermonkey e recarregue o SigEduca. O item abre a consulta de atestados com a rota `#consulta-atestados-lote`.
+
+Informe os códigos dos alunos, um por linha. A ferramenta consulta os atestados, percorre a paginação e lê os detalhes para emitir relatórios PDF, HTML e CSV. Os resultados ficam na aba até recarregar ou limpar; exporte antes de sair. A opção **Mostrar tela original** permite conferir a consulta nativa.
 
 ## Termos de Compromisso
 

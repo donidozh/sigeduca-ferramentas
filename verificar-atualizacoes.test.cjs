@@ -34,7 +34,7 @@ function menu(respond, modulo = 'ged') {
 }
 test('todos os scripts mantêm identidade e URLs instaláveis', () => {
   const files = ['menu-ferramentas.user.js', ...catalogoPublicado.ferramentas.map(t => t.arquivo)];
-  assert.equal(files.length, 15);
+  assert.equal(files.length, 16);
   const identities = new Set();
   for (const file of files) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
@@ -113,12 +113,12 @@ const catalogoPublicado = JSON.parse(fs.readFileSync(path.join(__dirname, 'catal
 test('catálogo cobre todas as ferramentas, com arquivos existentes e instalação restrita ao repositório', () => {
   const m = menu(() => {});
   const itens = m.validarCatalogo(catalogoPublicado);
-  assert.equal(itens.length, 14);
+  assert.equal(itens.length, 15);
   for (const item of itens) {
     assert.ok(item.installUrl.startsWith(root));
     assert.ok(fs.existsSync(path.join(__dirname, item.installUrl.slice(root.length))));
   }
-  assert.equal(new Set(itens.map(item => item.installUrl)).size, 14);
+  assert.equal(new Set(itens.map(item => item.installUrl)).size, 15);
 });
 test('catálogo rejeita URL externa, travessia de pasta, formato inválido e IDs duplicados', () => {
   const m = menu(() => {});
@@ -133,7 +133,7 @@ test('novidade aparece pela atualização do catálogo sem modificar o menu; cli
   let chamadas = 0;
   const m = menu(o => { chamadas++; o.onload({ status: 200, responseText: JSON.stringify(resposta) }); });
   await m.carregarCatalogo();
-  assert.equal(m.estadoCatalogo().itens.length, 11);
+  assert.equal(m.estadoCatalogo().itens.length, 12);
   await m.carregarCatalogo();
   assert.equal(chamadas, 1);
   resposta.ferramentas.push({ id: 'nova', titulo: 'Nova ferramenta', descricao: 'Teste', arquivo: 'nova.user.js', registros: ['nova'] });
@@ -155,7 +155,7 @@ test('falha de catálogo mantém ferramentas instaladas e permite tentar novamen
   falha = true;
   await m.carregarCatalogo(true);
   assert.equal(m.estadoCatalogo().estado, 'erro');
-  assert.equal(m.estadoCatalogo().itens.length, 11);
+  assert.equal(m.estadoCatalogo().itens.length, 12);
   assert.ok(m.ferramentas.has('requerimentos'));
   falha = false;
   await m.carregarCatalogo(true);
@@ -171,7 +171,7 @@ test('primeira instalação exibe a central e botões que abrem o script correto
   percorrer(m.refs.conteudo);
   assert.ok(todos.some(el => el.textContent === 'Central de ferramentas · GED'));
   const botoes = todos.filter(el => el.tag === 'button');
-  assert.equal(botoes.length, 11);
+  assert.equal(botoes.length, 12);
   botoes[0].events.click();
   assert.equal(m.opened[0][0], root + 'ged/termos-compromisso.user.js');
   assert.equal(m.ferramentas.size, 0);
@@ -188,7 +188,7 @@ test('módulos isolam links, catálogo e cores automaticamente', async () => {
  assert.equal(m.sanitizarFerramenta({...registro,url:id==='ged'?'/grh/teste.aspx':'/ged/teste.aspx'}),null);
  assert.equal(m.sanitizarFerramenta({...registro,url:'https://example.com/'+id+'/teste.aspx'}),null);
  await m.carregarCatalogo();
- assert.equal(m.estadoCatalogo().itens.length,id==='ged'?11:2);
+ assert.equal(m.estadoCatalogo().itens.length,id==='ged'?12:2);
  }
 });
 

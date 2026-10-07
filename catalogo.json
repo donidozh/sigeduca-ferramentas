@@ -102,6 +102,18 @@
       ]
     },
     {
+      "id": "consulta-atestados-lote",
+      "titulo": "Consulta de Atestados em Lote",
+      "descricao": "Consulta atestados por código do aluno, lê detalhes e todas as páginas e exporta relatórios PDF, HTML e CSV.",
+      "arquivo": "ged/consulta-atestados-lote.user.js",
+      "registros": [
+        "consulta-atestados-lote"
+      ],
+      "modulos": [
+        "ged"
+      ]
+    },
+    {
       "id": "extrair-dados-pessoais",
       "titulo": "Extrair Dados Pessoais",
       "descricao": "Extrai dados pessoais, sociais e de matrícula.",
