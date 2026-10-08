@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA — Exportador de Contratos em Lote
 // @namespace    sigeduca.contratos.lote
-// @version      3.0.1
+// @version      3.0.2
 // @description  Exportação de contratos por servidor, integrada ao menu GPE, com consulta automática e seleção de tipos de processo.
 // @match        *://sigeduca.seduc.mt.gov.br/grh/*
 // @noframes
@@ -19,7 +19,7 @@
   window.__SIGEDUCA_CONTRATOS__ = true;
   const updateURL = 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/exportador-contratos.user.js';
   const ATUALIZACAO_SCRIPT = {
-    versao: typeof GM_info === 'object' ? GM_info.script.version : '3.0.1', updateUrl: updateURL, installUrl: updateURL
+    versao: typeof GM_info === 'object' ? GM_info.script.version : '3.0.2', updateUrl: updateURL, installUrl: updateURL
   };
   const ferramenta = {
     id: 'gpe-exportador-contratos', titulo: 'Exportador de Contratos',
@@ -51,7 +51,7 @@
   const safe = s => clean(s).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150) || 'SEM_NOME';
   const text = (root, sel) => clean(root.querySelector(sel)?.textContent);
   const panel = document.createElement('section'); panel.id = 'sce-panel';
-  panel.innerHTML = `<header class="sce-header"><div><span class="sce-eyebrow">GPE · GESTÃO DE PESSOAS</span><h1>Exportador de Contratos</h1><p>Documentos da escola, organizados por servidor.</p></div><button type="button" id="sce-original">Página original</button></header>
+  panel.innerHTML = `<header class="sce-header"><div><span class="sce-eyebrow">GPE · GESTÃO DE PESSOAS</span><h1>Exportador de Contratos</h1><p>Documentos da escola, organizados por servidor.</p></div></header>
     <div class="sce-layout"><aside><section class="sce-card"><h2>Preparar exportação</h2><p>Um arquivo HTML por servidor, com seus processos em ordem, dentro de um único ZIP.</p>
       <label class="sce-option"><input type="checkbox" id="sce-group" checked><span><strong>Agrupar por servidor</strong><small>Reúne os documentos pelo código do servidor.</small></span></label>
       <label class="sce-option"><input type="checkbox" id="sce-extra" checked><span><strong>Retificações e distratos</strong><small>Inclui os documentos disponíveis além do contrato.</small></span></label>
@@ -87,7 +87,16 @@
     @media(max-width:850px){#sce-panel{padding:24px 18px 40px 42px}#sce-panel .sce-layout{grid-template-columns:1fr}#sce-panel .sce-header{align-items:start}#sce-panel h1{font-size:24px}#sce-panel .sce-stats{gap:6px}#sce-panel .sce-stats div{padding:12px}}
   `;
   document.head.append(style); document.body.append(panel);
-  nativeForm.classList.add('sce-native'); nativeForm.setAttribute('aria-hidden', 'true'); document.body.classList.add('sce-active');
+  // Reutiliza o cabeçalho vivo: preserva menu, perfil, ano e contador da sessão.
+  const nativeHeader = document.getElementById('TABLETOPOMENU_MPAGE');
+  if (nativeHeader && nativeForm.contains(nativeHeader)) nativeForm.prepend(nativeHeader);
+  const nativeContent = document.createElement('div');
+  nativeContent.className = 'sce-native'; nativeContent.setAttribute('aria-hidden', 'true');
+  for (const node of [...nativeForm.childNodes]) {
+    if (node !== nativeHeader) nativeContent.append(node);
+  }
+  nativeForm.append(nativeContent);
+  document.body.classList.add('sce-active');
   const $ = s => panel.querySelector(s);
   function refreshStats() {
     $('#sce-doc-count').textContent = total; $('#sce-file-count').textContent = savedFiles;
@@ -105,14 +114,13 @@
     row.dataset.state = state; row.querySelector('small').textContent = label;
   }
   function setBusy(busy) {
-    for (const el of panel.querySelectorAll('input, #sce-all, #sce-test, #sce-original, #sce-retry')) el.disabled = busy;
+    for (const el of panel.querySelectorAll('input, #sce-all, #sce-test, #sce-retry')) el.disabled = busy;
     $('#sce-stop').disabled = !running;
     if (!busy) $('#sce-all').disabled = $('#sce-test').disabled = !availableTypes.length;
   }
   $('#sce-stop').onclick = () => { stop = true; $('#sce-stop').disabled = true; log('Parando após a operação atual e salvando o lote parcial…'); };
   $('#sce-test').onclick = () => run(true);
   $('#sce-all').onclick = () => run(false);
-  $('#sce-original').onclick = () => { location.hash = 'sigeduca-original'; location.reload(); };
   $('#sce-retry').onclick = () => prepareEmission();
   window.addEventListener('beforeunload', event => { if (running) { event.preventDefault(); event.returnValue = ''; } });
   function confirmButton() {
@@ -130,7 +138,7 @@
     } catch (error) { if (error.message.startsWith('A página foi')) throw error; }
     const start = Date.now(); let button;
     while (!(button = confirmButton()) && Date.now() - start < 10000) await sleep(200);
-    if (!button) throw Error('Botão Confirmar não encontrado. Abra Página original e confira a escola e o período.');
+    if (!button) throw Error('Botão Confirmar não encontrado. Confira a escola e o período pelo menu do SIGEDUCA.');
     log('Abrindo a emissão pelo botão Confirmar…');
     // O Confirmar nativo mantém os parâmetros e validações da escola. Redireciona
     // apenas a abertura da emissão para um frame; outros destinos ficam intactos.
@@ -153,7 +161,7 @@
         if (errors) throw Error(errors);
         await sleep(200);
       }
-      throw Error('A emissão não abriu em 45 segundos. Confira a sessão, a escola e o período na Página original.');
+      throw Error('A emissão não abriu em 45 segundos. Confira a sessão, a escola e o período pelo menu do SIGEDUCA.');
     } finally { window.open = originalOpen; try { sessionStorage.removeItem(guardKey); } catch (_) {} }
   }
   async function prepareEmission() {
@@ -165,7 +173,7 @@
         workerURL = emission.location.href;
         const s = state(emission.document), params = new URL(workerURL).search.slice(1).split(',');
         scope = String(s.vGERLOTCOD || s.vGRHLOTCOD || (/^\d+$/.test(params[1] || '') ? params[1] : ''));
-        if (!scope) throw Error('Não foi possível identificar a lotação da emissão. Confira a escola na Página original.');
+        if (!scope) throw Error('Não foi possível identificar a lotação da emissão. Confira a escola pelo menu do SIGEDUCA.');
         availableTypes = [...emission.document.querySelector('#vGRHTPOPRCIDFILTRO').options]
           .filter(o => !o.disabled && o.value && o.value !== '0').map(o => ({ value: o.value, label: clean(o.textContent) }));
         if (!availableTypes.length) throw Error('Nenhum tipo de processo disponível na emissão.');
