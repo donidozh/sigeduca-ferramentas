@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA - GPE - Calendário A4
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Prévia do calendário escolar em A4 retrato, com 12 ou 6 meses por folha.
 // @author       Elder Martins
 // @match        *://sigeduca.seduc.mt.gov.br/grh/*
@@ -16,10 +16,22 @@
 (function () {
     'use strict';
     const ATUALIZACAO_SCRIPT = Object.freeze({
-        versao: typeof GM_info === 'object' ? GM_info.script.version : '1.0.0',
+        versao: typeof GM_info === 'object' ? GM_info.script.version : '1.0.1',
         updateUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/calendario-a4.user.js',
         installUrl: 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/calendario-a4.user.js'
     });
+    // Registro no menu modular do GPE.
+    const FERRAMENTA = Object.freeze({
+        id: 'gpe-calendario-a4', titulo: 'Calendário A4', url: '/grh/hwmgrhlotcal.aspx',
+        descricao: 'Abrir calendários e imprimir em A4 retrato', grupo: 'GPE', ordem: 100
+    });
+    const register = () => window.dispatchEvent(new CustomEvent('sigeduca:ferramentas:registrar', {
+        detail: { ...FERRAMENTA, ...ATUALIZACAO_SCRIPT }
+    }));
+    window.addEventListener('sigeduca:ferramentas:solicitar-registro', register);
+    window.addEventListener('sigeduca:ferramentas:base-pronta', register);
+    register();
+    setTimeout(register, 100);
     if (!/\/hwmgrhcalendarioimp\.aspx$/i.test(location.pathname)) return;
     const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
         'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
@@ -227,17 +239,6 @@
         button.onclick = openPreview;
         document.body.append(button);
         ready = true;
-        // Registro no menu modular do GPE.
-        const FERRAMENTA = Object.freeze({
-            id: 'gpe-calendario-a4', titulo: 'Calendário A4', url: location.href,
-            descricao: 'Formatar o calendário aberto em A4 retrato', grupo: 'GPE', ordem: 100
-        });
-        const register = () => window.dispatchEvent(new CustomEvent('sigeduca:ferramentas:registrar', {
-            detail: { ...FERRAMENTA, ...ATUALIZACAO_SCRIPT }
-        }));
-        window.addEventListener('sigeduca:ferramentas:solicitar-registro', register);
-        window.addEventListener('sigeduca:ferramentas:base-pronta', register);
-        register();
         if (pending) openPreview();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
