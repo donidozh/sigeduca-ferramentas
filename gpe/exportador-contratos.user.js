@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SIGEDUCA — Exportador de Contratos em Lote
 // @namespace    sigeduca.contratos.lote
-// @version      3.0.0
+// @version      3.0.1
 // @description  Exportação de contratos por servidor, integrada ao menu GPE, com consulta automática e seleção de tipos de processo.
 // @match        *://sigeduca.seduc.mt.gov.br/grh/*
 // @noframes
@@ -19,7 +19,7 @@
   window.__SIGEDUCA_CONTRATOS__ = true;
   const updateURL = 'https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/exportador-contratos.user.js';
   const ATUALIZACAO_SCRIPT = {
-    versao: typeof GM_info === 'object' ? GM_info.script.version : '3.0.0', updateUrl: updateURL, installUrl: updateURL
+    versao: typeof GM_info === 'object' ? GM_info.script.version : '3.0.1', updateUrl: updateURL, installUrl: updateURL
   };
   const ferramenta = {
     id: 'gpe-exportador-contratos', titulo: 'Exportador de Contratos',
@@ -68,6 +68,9 @@
   const style = document.createElement('style');
   style.textContent = `
     body.sce-active{margin:0!important;background:#f5f6f8!important;opacity:1!important}
+    /* Mantém a emissão renderizável para leitura dos frames, sem cobrir o exportador. */
+    body.sce-active #GB_window{position:fixed!important;left:-18000px!important;top:0!important;pointer-events:none!important}
+    body.sce-active #GB_overlay{display:none!important;pointer-events:none!important}
     body.sce-active .sce-native{position:fixed!important;left:-18000px!important;top:0!important;width:1200px!important;height:1000px!important;overflow:auto!important;pointer-events:none!important}
     #sce-panel{max-width:1480px;margin:auto;padding:30px 40px 60px 66px;color:#342126;font:14px Arial,sans-serif;text-align:left}
     #sce-panel *{box-sizing:border-box}#sce-panel [hidden]{display:none!important}
