@@ -2,6 +2,18 @@
   "formato": 1,
   "ferramentas": [
     {
+      "id": "gpe-exportador-contratos",
+      "titulo": "Exportador de Contratos",
+      "descricao": "Consulta contratos, retificações e distratos por tipo de processo e exporta um HTML por servidor em ZIP.",
+      "arquivo": "gpe/exportador-contratos.user.js",
+      "registros": [
+        "gpe-exportador-contratos"
+      ],
+      "modulos": [
+        "grh"
+      ]
+    },
+    {
       "id": "gpe-calendario-a4",
       "titulo": "Calendário A4",
       "descricao": "Formata a impressão do calendário escolar em A4 retrato, com legenda e assinaturas ao final. Abra Imprimir Calendário no GPE.",

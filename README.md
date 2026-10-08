@@ -26,6 +26,7 @@ Se você já usava os scripts antigos, instale estas versões uma vez para receb
 
 | Ferramenta | Instalação | Onde aparece |
 | --- | --- | --- |
+| Exportador de Contratos (GPE) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/exportador-contratos.user.js) | GPE — fechamento do quadro e emissão por servidor |
 | Arquivo Digital - GPE | [Instalar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/arquivo-digital-servidores.user.js) | GPE — cadastro de servidores |
 | Calendário A4 (GPE) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/calendario-a4.user.js) | Imprimir Calendário no GPE |
 | Menu Lateral de Ferramentas (Base) | [Instalar / atualizar](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/menu-ferramentas.user.js) | Menu Ferramentas |
@@ -123,4 +124,3 @@ O menu 2.8.0 identifica o módulo pelo endereço: `/ged` exibe GED em azul; `/gr
 Para uma nova ferramenta GPE, use `modulos: ["grh"]` no catálogo, `@match *://sigeduca.seduc.mt.gov.br/grh/*` no userscript e uma URL dentro de `/grh/` no registro. Para GED, use `ged`. Entradas antigas sem `modulos` continuam sendo GED. A ferramenta de notas fiscais é marcada como `gpo`, seu módulo de origem, e não aparece na central GED/GPE. O menu também identifica `/gpo` e usa marrom nessa área. Categorias serão definidas posteriormente.
 
 O Lançador de Históricos 5.1.0 usa um painel mais próximo do GED, com cabeçalho azul, campos e ações organizados e tabela com rolagem horizontal em telas menores. A lógica de lançamento foi preservada.
-

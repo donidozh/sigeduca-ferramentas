@@ -34,7 +34,7 @@ function menu(respond, modulo = 'ged') {
 }
 test('todos os scripts mantêm identidade e URLs instaláveis', () => {
   const files = ['menu-ferramentas.user.js', ...catalogoPublicado.ferramentas.map(t => t.arquivo)];
-  assert.equal(files.length, 16);
+  assert.equal(files.length, 17);
   const identities = new Set();
   for (const file of files) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
@@ -113,12 +113,12 @@ const catalogoPublicado = JSON.parse(fs.readFileSync(path.join(__dirname, 'catal
 test('catálogo cobre todas as ferramentas, com arquivos existentes e instalação restrita ao repositório', () => {
   const m = menu(() => {});
   const itens = m.validarCatalogo(catalogoPublicado);
-  assert.equal(itens.length, 15);
+  assert.equal(itens.length, 16);
   for (const item of itens) {
     assert.ok(item.installUrl.startsWith(root));
     assert.ok(fs.existsSync(path.join(__dirname, item.installUrl.slice(root.length))));
   }
-  assert.equal(new Set(itens.map(item => item.installUrl)).size, 15);
+  assert.equal(new Set(itens.map(item => item.installUrl)).size, 16);
 });
 test('catálogo rejeita URL externa, travessia de pasta, formato inválido e IDs duplicados', () => {
   const m = menu(() => {});
@@ -188,7 +188,8 @@ test('módulos isolam links, catálogo e cores automaticamente', async () => {
  assert.equal(m.sanitizarFerramenta({...registro,url:id==='ged'?'/grh/teste.aspx':'/ged/teste.aspx'}),null);
  assert.equal(m.sanitizarFerramenta({...registro,url:'https://example.com/'+id+'/teste.aspx'}),null);
  await m.carregarCatalogo();
- assert.equal(m.estadoCatalogo().itens.length,id==='ged'?12:2);
+ assert.equal(m.estadoCatalogo().itens.length,id==='ged'?12:3);
+ assert.equal(m.estadoCatalogo().itens.some(item=>item.id==='gpe-exportador-contratos'),id==='grh');
  }
 });
 

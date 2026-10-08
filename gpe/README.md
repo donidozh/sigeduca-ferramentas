@@ -1,4 +1,10 @@
-# Arquivo Digital - GPE
+# Ferramentas — GPE
+
+## Exportador de Contratos
+
+Nova ferramenta integrada ao menu GPE: [script](exportador-contratos.user.js) e [orientações](exportador-contratos.md). Reorganiza a página de fechamento do quadro, abre a emissão pelo Confirmar nativo e exporta por servidor como padrão, com seleção e acompanhamento dos tipos de processo, retificações e distratos.
+
+## Arquivo Digital - GPE
 
 [Instalar no Tampermonkey](https://raw.githubusercontent.com/donidozh/sigeduca-ferramentas/main/gpe/arquivo-digital-servidores.user.js).
 
