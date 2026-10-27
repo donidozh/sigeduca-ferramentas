@@ -30,18 +30,6 @@
       "modulos": ["grh"]
     },
     {
-      "id": "termos-compromisso",
-      "titulo": "Termos de Compromisso",
-      "descricao": "Termos escolares, imagem com seleção por idade e compromisso de entrega de documentos pendentes.",
-      "arquivo": "ged/termos-compromisso.user.js",
-      "registros": [
-        "termos-compromisso"
-      ],
-      "modulos": [
-        "ged"
-      ]
-    },
-    {
       "id": "requerimentos",
       "titulo": "Requerimentos",
       "descricao": "Central de requerimentos de alunos.",
